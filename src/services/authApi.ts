@@ -140,10 +140,40 @@ function generateMockToken(user: AdminUser): string {
   return `${header}.${payload}.${signature}`
 }
 
+// Robust real-time network connectivity verification
+export async function isNetworkAvailable(): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return false
+  }
+  if (typeof window === 'undefined') {
+    return true
+  }
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 2500)
+    await fetch('https://www.gstatic.com/generate_204', {
+      method: 'HEAD',
+      mode: 'no-cors',
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export const authApi = {
   // Login
   async login(credentials: LoginCredentials): Promise<AuthSession> {
     const emailNorm = credentials.email.trim().toLowerCase()
+
+    // 0. Verify network connection is available; block authentication if offline or network turned off
+    const online = await isNetworkAvailable()
+    if (!online) {
+      throw new Error('Network connection unavailable. Please check your internet connection and try again.')
+    }
 
     // 1. Attempt backend API first
     try {
@@ -160,9 +190,40 @@ export const authApi = {
           details: `Logged in via backend API from ${navigator.userAgent.slice(0, 50)}`,
         })
         return data
+      } else {
+        const errorData = await res.json().catch(() => ({}))
+        throw new Error(errorData.error || `Authentication failed (HTTP ${res.status})`)
       }
-    } catch {
-      // Backend auth endpoint offline / not deployed yet; proceed to robust local simulation
+    } catch (err: any) {
+      // Re-verify network status on any failure
+      const isOnline = await isNetworkAvailable()
+      if (!isOnline) {
+        throw new Error('Network connection unavailable. Please check your internet connection and try again.')
+      }
+
+      // Check for explicit network failure error indicators
+      const msg = err?.message || ''
+      if (
+        msg.includes('INTERNET_DISCONNECTED') ||
+        msg.includes('NETWORK_CHANGED') ||
+        msg.includes('net::ERR_NAME_NOT_RESOLVED') ||
+        msg.includes('Network connection unavailable')
+      ) {
+        throw new Error('Network connection unavailable. Please check your internet connection and try again.')
+      }
+
+      // If an explicit backend server URL is configured and request failed, block authentication
+      if (import.meta.env.VITE_API_URL) {
+        throw new Error(err.message || 'Network failure: Unable to reach the authentication server. Please check your network connection.')
+      }
+
+      // If an explicit backend error was thrown (e.g. 401 or 403), rethrow it
+      if (msg && !msg.includes('Failed to fetch') && !msg.includes('NetworkError') && !msg.includes('Load failed')) {
+        throw err
+      }
+
+      // In local development with default localhost URL and online network:
+      // proceed to local resilient fallback
     }
 
     // 2. Local resilient fallback
@@ -195,7 +256,7 @@ export const authApi = {
       id: target.id,
       email: target.email,
       name: target.name,
-      role: target.role,
+      role: target.role || 'viewer',
       status: target.status,
       phone: target.phone,
       avatarUrl: target.avatarUrl,
@@ -224,6 +285,42 @@ export const authApi = {
   async register(data: SignUpData): Promise<{ user: AdminUser; isPending: boolean; message: string }> {
     const emailNorm = data.email.trim().toLowerCase()
 
+    // 0. Verify network connection is available; block registration if offline or network turned off
+    const online = await isNetworkAvailable()
+    if (!online) {
+      throw new Error('Network connection unavailable. Please check your internet connection and try again.')
+    }
+
+    // Full Legal Name validation
+    const nameTrimmed = data.name.trim()
+    if (!nameTrimmed) {
+      throw new Error('Full legal name is required.')
+    }
+    if (/\d/.test(nameTrimmed)) {
+      throw new Error('Full legal name cannot contain numbers. Only alphabetic characters are allowed.')
+    }
+    if (!/^[a-zA-Z\s.'-]+$/.test(nameTrimmed)) {
+      throw new Error('Full legal name can only contain letters, spaces, hyphens, and apostrophes.')
+    }
+
+    // Phone number character and length boundary validation
+    if (data.phone && data.phone.trim()) {
+      const trimmedPhone = data.phone.trim()
+      if (/[a-zA-Z]/.test(trimmedPhone)) {
+        throw new Error('Alphabetic characters are not allowed in phone number. Please enter valid numeric characters only.')
+      }
+      if (!/^[+]?[\d\s\-()]+$/.test(trimmedPhone)) {
+        throw new Error('Invalid phone number: Special characters are not allowed.')
+      }
+      const phoneDigits = trimmedPhone.replace(/\D/g, '')
+      if (phoneDigits.length > 15) {
+        throw new Error('Phone number cannot exceed the allowed length of 15 digits.')
+      }
+      if (phoneDigits.length < 10) {
+        throw new Error('Phone number must be at least 10 digits.')
+      }
+    }
+
     try {
       const res = await fetch(`${API_BASE_URL}/auth/register`, {
         method: 'POST',
@@ -232,9 +329,43 @@ export const authApi = {
       })
       if (res.ok) {
         return await res.json()
+      } else {
+        const errorData = await res.json().catch(() => ({}))
+        const serverError = errorData.error || errorData.message || (res.status >= 500
+          ? `Server error (${res.status}): Registration server temporarily unavailable. Please try again later.`
+          : `Registration failed (${res.status}): ${res.statusText}`)
+        throw new Error(serverError)
       }
-    } catch {
-      // Backend fallback
+    } catch (err: any) {
+      // Re-verify network connection on failure
+      const isOnline = await isNetworkAvailable()
+      if (!isOnline) {
+        throw new Error('Network connection unavailable. Please check your internet connection and try again.')
+      }
+
+      // Check for explicit network failure error indicators
+      const msg = err?.message || ''
+      if (
+        msg.includes('INTERNET_DISCONNECTED') ||
+        msg.includes('NETWORK_CHANGED') ||
+        msg.includes('net::ERR_NAME_NOT_RESOLVED') ||
+        msg.includes('Network connection unavailable')
+      ) {
+        throw new Error('Network connection unavailable. Please check your internet connection and try again.')
+      }
+
+      // If an explicit server error (e.g. 500 Server error, 400 Bad request) was returned, rethrow it to handle server failure gracefully
+      if (msg && !msg.includes('Failed to fetch') && !msg.includes('NetworkError') && !msg.includes('Load failed')) {
+        throw err
+      }
+
+      // If an explicit backend server URL is configured and request failed, block registration
+      if (import.meta.env.VITE_API_URL) {
+        throw new Error('Server unavailable: Unable to reach the registration server. Please try again later.')
+      }
+
+      // In local development with default localhost URL and online network:
+      // proceed to local resilient fallback
     }
 
     const admins = getLocalAdmins()
@@ -242,21 +373,24 @@ export const authApi = {
       throw new Error('An account with this email address already exists.')
     }
 
-    // Auto-approve if master passcode matches or if it's the very first user
+    // Auto-approve if master passcode matches, or if department/role is left blank (default staff viewer access), or if it's the very first user
     const MASTER_PASSCODE = 'BF-ADMIN-2026'
     const isFirstUser = admins.length === 0
-    const isInstantApproved = isFirstUser || data.inviteCode?.trim().toUpperCase() === MASTER_PASSCODE
+    const isBlankRole = !data.role || data.role === 'viewer'
+    const isInstantApproved = isFirstUser || isBlankRole || data.inviteCode?.trim().toUpperCase() === MASTER_PASSCODE
 
     const newAdmin: AdminUser & { password: string } = {
       id: `admin-${Date.now()}`,
       email: emailNorm,
       name: data.name.trim(),
-      role: isFirstUser ? 'super_admin' : data.role || 'viewer',
+      role: isFirstUser ? 'super_admin' : (data.role || 'viewer'),
       status: isInstantApproved ? 'active' : 'pending_approval',
       phone: data.phone,
       avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(data.name)}`,
       createdAt: new Date().toISOString(),
-      notes: isInstantApproved ? 'Activated via Master Passcode' : 'Self-registered; awaiting Super Admin review',
+      notes: isInstantApproved
+        ? (isBlankRole ? 'Activated with default Staff Viewer access' : 'Activated via Master Passcode')
+        : 'Self-registered; awaiting Super Admin review',
       password: data.password,
     }
 
@@ -266,7 +400,7 @@ export const authApi = {
       adminEmail: newAdmin.email,
       action: isInstantApproved ? 'ADMIN_REGISTERED_ACTIVE' : 'ACCESS_REQUEST_SUBMITTED',
       details: isInstantApproved
-        ? 'Account instantly activated with Master Passcode'
+        ? (isBlankRole ? 'Staff account auto-activated with default viewer role' : 'Account instantly activated with Master Passcode')
         : 'Access application submitted with status: pending_approval',
     })
 
@@ -327,6 +461,35 @@ export const authApi = {
   // Invite / Create Admin directly
   async inviteAdmin(data: AdminInviteData, creatorEmail: string): Promise<AdminUser> {
     const emailNorm = data.email.trim().toLowerCase()
+
+    // Full Legal Name validation
+    const nameTrimmed = data.name.trim()
+    if (!nameTrimmed) {
+      throw new Error('Full legal name is required.')
+    }
+    if (/\d/.test(nameTrimmed)) {
+      throw new Error('Full legal name cannot contain numbers. Only alphabetic characters are allowed.')
+    }
+    if (!/^[a-zA-Z\s.'-]+$/.test(nameTrimmed)) {
+      throw new Error('Full legal name can only contain letters, spaces, hyphens, and apostrophes.')
+    }
+
+    if (data.phone && data.phone.trim()) {
+      const trimmedPhone = data.phone.trim()
+      if (/[a-zA-Z]/.test(trimmedPhone)) {
+        throw new Error('Alphabetic characters are not allowed in phone number. Please enter valid numeric characters only.')
+      }
+      if (!/^[+]?[\d\s\-()]+$/.test(trimmedPhone)) {
+        throw new Error('Invalid phone number: Special characters are not allowed.')
+      }
+      const phoneDigits = trimmedPhone.replace(/\D/g, '')
+      if (phoneDigits.length > 15) {
+        throw new Error('Phone number cannot exceed the allowed length of 15 digits.')
+      }
+      if (phoneDigits.length < 10) {
+        throw new Error('Phone number must be at least 10 digits.')
+      }
+    }
 
     try {
       const res = await fetch(`${API_BASE_URL}/auth/admins/invite`, {
@@ -526,8 +689,38 @@ export const authApi = {
       target.password = data.newPassword
     }
 
-    if (data.name) target.name = data.name.trim()
-    if (data.phone !== undefined) target.phone = data.phone.trim()
+    if (data.name !== undefined) {
+      const nameTrimmed = data.name.trim()
+      if (!nameTrimmed) {
+        throw new Error('Full legal name cannot be empty.')
+      }
+      if (/\d/.test(nameTrimmed)) {
+        throw new Error('Full legal name cannot contain numbers. Only alphabetic characters are allowed.')
+      }
+      if (!/^[a-zA-Z\s.'-]+$/.test(nameTrimmed)) {
+        throw new Error('Full legal name can only contain letters, spaces, hyphens, and apostrophes.')
+      }
+      target.name = nameTrimmed
+    }
+    if (data.phone !== undefined) {
+      const trimmedPhone = data.phone.trim()
+      if (trimmedPhone) {
+        if (/[a-zA-Z]/.test(trimmedPhone)) {
+          throw new Error('Alphabetic characters are not allowed in phone number. Please enter valid numeric characters only.')
+        }
+        if (!/^[+]?[\d\s\-()]+$/.test(trimmedPhone)) {
+          throw new Error('Invalid phone number: Special characters are not allowed.')
+        }
+        const phoneDigits = trimmedPhone.replace(/\D/g, '')
+        if (phoneDigits.length > 15) {
+          throw new Error('Phone number cannot exceed the allowed length of 15 digits.')
+        }
+        if (phoneDigits.length < 10) {
+          throw new Error('Phone number must be at least 10 digits.')
+        }
+      }
+      target.phone = trimmedPhone
+    }
     if (data.avatarUrl !== undefined) target.avatarUrl = data.avatarUrl
 
     saveLocalAdmins(admins)

@@ -77,6 +77,32 @@ export const AdminManagementView: React.FC = () => {
       return
     }
 
+    if (/\d/.test(inviteName.trim())) {
+      addToast('error', 'Invalid Name', 'Full legal name cannot contain numbers. Only alphabetic characters are allowed.')
+      return
+    }
+
+    if (!/^[a-zA-Z\s.'-]+$/.test(inviteName.trim())) {
+      addToast('error', 'Invalid Name', 'Full legal name can only contain letters, spaces, hyphens, and apostrophes.')
+      return
+    }
+
+    if (invitePhone.trim()) {
+      if (/[a-zA-Z]/.test(invitePhone.trim())) {
+        addToast('error', 'Invalid Phone', 'Alphabetic characters are not allowed in phone number.')
+        return
+      }
+      const phoneDigits = invitePhone.trim().replace(/\D/g, '')
+      if (phoneDigits.length > 15) {
+        addToast('error', 'Invalid Phone', 'Phone number cannot exceed the allowed length of 15 digits.')
+        return
+      }
+      if (phoneDigits.length < 10) {
+        addToast('error', 'Invalid Phone', 'Phone number must be at least 10 digits.')
+        return
+      }
+    }
+
     setIsSubmittingInvite(true)
     try {
       await inviteAdmin({
@@ -543,7 +569,26 @@ export const AdminManagementView: React.FC = () => {
             <input
               type="text"
               value={inviteName}
-              onChange={(e) => setInviteName(e.target.value)}
+              onChange={(e) => {
+                const sanitized = e.target.value.replace(/\d/g, '')
+                setInviteName(sanitized)
+                if (/\d/.test(e.target.value)) {
+                  addToast('warning', 'Invalid Character', 'Numbers are not allowed in legal name.')
+                }
+              }}
+              onKeyDown={(e) => {
+                if (
+                  ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'].includes(e.key) ||
+                  e.ctrlKey ||
+                  e.metaKey
+                ) {
+                  return
+                }
+                if (/\d/.test(e.key)) {
+                  e.preventDefault()
+                  addToast('warning', 'Invalid Key', 'Numbers are not allowed in legal name.')
+                }
+              }}
               placeholder="e.g. Ramesh Varma"
               required
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:bg-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-hidden font-medium"
@@ -567,9 +612,29 @@ export const AdminManagementView: React.FC = () => {
               <label className="block text-xs font-semibold text-slate-700 mb-1">Mobile Contact</label>
               <input
                 type="tel"
+                inputMode="tel"
                 value={invitePhone}
-                onChange={(e) => setInvitePhone(e.target.value)}
+                onChange={(e) => {
+                  const sanitized = e.target.value.replace(/[a-zA-Z]/g, '').replace(/[^\d+\s\-()]/g, '')
+                  setInvitePhone(sanitized)
+                  if (/[a-zA-Z]/.test(e.target.value)) {
+                    addToast('warning', 'Invalid Character', 'Alphabetic characters are not allowed in phone number.')
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (
+                    ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter', 'Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(e.key) ||
+                    e.ctrlKey ||
+                    e.metaKey
+                  ) {
+                    return
+                  }
+                  if (/[a-zA-Z]/.test(e.key) || !/[\d+\s\-()]/.test(e.key)) {
+                    e.preventDefault()
+                  }
+                }}
                 placeholder="+91 98400..."
+                maxLength={25}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:bg-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-hidden font-medium"
               />
             </div>

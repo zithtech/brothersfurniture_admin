@@ -1,5 +1,6 @@
 import {
   Building2,
+  Contact,
   FileText,
   Home,
   MessageSquare,
@@ -103,6 +104,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, setIsMobileOpen 
     {
       title: 'BUSINESS',
       items: [
+        {
+          id: 'customers',
+          label: 'Customers',
+          icon: Contact,
+          matchViews: ['customers'],
+        },
         {
           id: 'clients',
           label: 'Corporate Clients',

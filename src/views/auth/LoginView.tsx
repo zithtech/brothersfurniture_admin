@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   AlertCircle,
   ArrowRight,
@@ -9,9 +9,11 @@ import {
   Mail,
   Shield,
   Sparkles,
+  WifiOff,
 } from 'lucide-react'
 import logoImg from '../../assets/logo.png'
 import { useAuth } from '../../context/AuthContext'
+import { isNetworkAvailable } from '../../services/authApi'
 
 export const LoginView: React.FC = () => {
   const { login, setAuthView } = useAuth()
@@ -22,6 +24,33 @@ export const LoginView: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false)
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOffline(false)
+      setErrorMsg((prev) => (prev?.toLowerCase().includes('network') || prev?.toLowerCase().includes('offline') ? null : prev))
+    }
+    const handleOffline = () => {
+      setIsOffline(true)
+      setErrorMsg('Network connection unavailable. Please check your internet connection and try again.')
+    }
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    // Check actual connectivity on mount
+    isNetworkAvailable().then((online) => {
+      if (!online) {
+        setIsOffline(true)
+      }
+    })
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -34,6 +63,14 @@ export const LoginView: React.FC = () => {
 
     setIsSubmitting(true)
     try {
+      // Block authentication immediately if network connection is turned off / unavailable
+      const online = await isNetworkAvailable()
+      if (!online) {
+        setIsOffline(true)
+        setErrorMsg('Network connection unavailable. Please check your internet connection and try again.')
+        return
+      }
+
       await login({ email: email.trim(), password, rememberMe })
     } catch (err: any) {
       setErrorMsg(err.message || 'Unable to sign in. Please check your credentials.')
@@ -84,10 +121,27 @@ export const LoginView: React.FC = () => {
             </div>
           </div>
 
+          {/* Offline Warning Banner */}
+          {isOffline && (
+            <div className="mb-5 p-3.5 bg-amber-50 border border-amber-200/80 rounded-xl flex items-start gap-3 animate-fade-in text-amber-800">
+              <WifiOff className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
+              <div>
+                <p className="text-xs font-bold">Network Connection Unavailable</p>
+                <p className="text-[11px] text-amber-700 mt-0.5">
+                  You are currently offline. Please reconnect to the internet to sign in.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Error Banner */}
           {errorMsg && (
             <div className="mb-5 p-3.5 bg-rose-50 border border-rose-200/80 rounded-xl flex items-start gap-3 animate-fade-in text-rose-800">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+              {errorMsg.toLowerCase().includes('network') || errorMsg.toLowerCase().includes('offline') ? (
+                <WifiOff className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+              ) : (
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+              )}
               <p className="text-xs leading-relaxed font-medium">{errorMsg}</p>
             </div>
           )}
@@ -96,7 +150,7 @@ export const LoginView: React.FC = () => {
             {/* Email Field */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-                Work Email Address
+                Work Email Address <span className="text-rose-500">*</span>
               </label>
               <div className="relative rounded-xl shadow-xs">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -118,7 +172,7 @@ export const LoginView: React.FC = () => {
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                  Password
+                  Password <span className="text-rose-500">*</span>
                 </label>
                 <span className="text-[11px] text-slate-400">Production Auth</span>
               </div>

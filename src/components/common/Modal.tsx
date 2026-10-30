@@ -49,7 +49,7 @@ export const Modal: React.FC<ModalProps> = ({
 
       {/* Modal Dialog */}
       <div
-        className={`relative w-full ${maxWidth} max-h-[88vh] flex flex-col bg-white border border-slate-200/90 rounded-2xl shadow-2xl overflow-hidden z-10 my-auto`}
+        className={`relative w-full ${maxWidth} max-h-[88vh] flex flex-col bg-white text-slate-900 border border-slate-200/90 rounded-2xl shadow-2xl overflow-hidden z-10 my-auto`}
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}

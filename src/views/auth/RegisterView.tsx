@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   AlertCircle,
   ArrowLeft,
@@ -11,24 +11,265 @@ import {
   Phone,
   ShieldAlert,
   User,
+  WifiOff,
 } from 'lucide-react'
 import logoImg from '../../assets/logo.png'
 import { useAuth } from '../../context/AuthContext'
 import type { AdminRole } from '../../types/auth'
+import { isNetworkAvailable } from '../../services/authApi'
 
 export const RegisterView: React.FC = () => {
   const { signup, setAuthView } = useAuth()
 
   const [name, setName] = useState('')
+  const [nameError, setNameError] = useState<string | null>(null)
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
-  const [role, setRole] = useState<AdminRole>('viewer')
+  const [phoneError, setPhoneError] = useState<string | null>(null)
+  const [role, setRole] = useState<AdminRole | ''>('')
   const [password, setPassword] = useState('')
   const [inviteCode, setInviteCode] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [successInfo, setSuccessInfo] = useState<{ isPending: boolean; message: string } | null>(null)
+  const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false)
+
+  const validateName = (value: string): string | null => {
+    const trimmed = value.trim()
+    if (!trimmed) return 'Full legal name is required.'
+
+    if (/\d/.test(trimmed)) {
+      return 'Full legal name cannot contain numbers. Only alphabetic characters are allowed.'
+    }
+
+    if (!/^[a-zA-Z\s.'-]+$/.test(trimmed)) {
+      return 'Full legal name can only contain letters, spaces, hyphens, and apostrophes.'
+    }
+
+    if (trimmed.length < 2) {
+      return 'Full legal name must be at least 2 characters.'
+    }
+
+    return null
+  }
+
+  const handleNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (
+      [
+        'Backspace',
+        'Delete',
+        'ArrowLeft',
+        'ArrowRight',
+        'ArrowUp',
+        'ArrowDown',
+        'Tab',
+        'Enter',
+        'Home',
+        'End',
+      ].includes(e.key) ||
+      e.ctrlKey ||
+      e.metaKey
+    ) {
+      return
+    }
+
+    // Explicitly reject numeric keys
+    if (/\d/.test(e.key)) {
+      e.preventDefault()
+      setNameError('Numbers are not allowed in full legal name. Please enter alphabetic characters only.')
+      return
+    }
+  }
+
+  const handleNamePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pasted = e.clipboardData.getData('text')
+    if (/\d/.test(pasted)) {
+      e.preventDefault()
+      const sanitized = pasted.replace(/\d/g, '')
+      const input = e.currentTarget
+      const start = input.selectionStart || 0
+      const end = input.selectionEnd || 0
+      const newName = name.slice(0, start) + sanitized + name.slice(end)
+      setName(newName)
+      setNameError('Numbers are not allowed in full legal name. Only alphabetic characters are accepted.')
+    }
+  }
+
+  const handleNameChange = (val: string) => {
+    const hasDigits = /\d/.test(val)
+
+    // Restrict input to non-numeric characters
+    const sanitized = val.replace(/\d/g, '')
+    setName(sanitized)
+
+    if (hasDigits) {
+      setNameError('Full legal name cannot contain numbers. Only alphabetic characters are allowed.')
+      return
+    }
+
+    if (sanitized.trim()) {
+      if (!/^[a-zA-Z\s.'-]+$/.test(sanitized)) {
+        setNameError('Full legal name can only contain letters, spaces, hyphens, and apostrophes.')
+        return
+      }
+      setNameError(null)
+      if (errorMsg?.toLowerCase().includes('name')) {
+        setErrorMsg(null)
+      }
+    } else {
+      setNameError(null)
+    }
+  }
+
+  const handleNameBlur = () => {
+    if (name.trim()) {
+      const err = validateName(name)
+      setNameError(err)
+    }
+  }
+
+  const validatePhone = (value: string): string | null => {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+
+    if (/[a-zA-Z]/.test(trimmed)) {
+      return 'Alphabetic characters are not allowed. Please enter valid numeric characters only.'
+    }
+
+    if (!/^[+]?[\d\s\-()]+$/.test(trimmed)) {
+      return 'Please enter a valid phone number containing only numeric digits.'
+    }
+
+    const digits = trimmed.replace(/\D/g, '')
+    if (digits.length > 15) {
+      return 'Phone number cannot exceed the allowed length of 15 digits.'
+    }
+    if (digits.length < 10) {
+      return 'Phone number must be at least 10 digits.'
+    }
+    return null
+  }
+
+  const handlePhoneKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Allow navigation, deletion, selection, clipboard shortcuts, enter, tab
+    if (
+      [
+        'Backspace',
+        'Delete',
+        'ArrowLeft',
+        'ArrowRight',
+        'ArrowUp',
+        'ArrowDown',
+        'Tab',
+        'Enter',
+        'Home',
+        'End',
+        'Shift',
+        'Control',
+        'Alt',
+        'Meta',
+        'CapsLock',
+      ].includes(e.key) ||
+      e.ctrlKey ||
+      e.metaKey
+    ) {
+      return
+    }
+
+    // Explicitly reject alphabetic characters
+    if (/[a-zA-Z]/.test(e.key)) {
+      e.preventDefault()
+      setPhoneError('Alphabetic characters are not allowed. Please enter valid numeric characters only.')
+      return
+    }
+
+    // Reject other invalid symbols (only allow digits, '+', space, '-', '(', ')')
+    if (!/[\d+\s\-()]/.test(e.key)) {
+      e.preventDefault()
+      setPhoneError('Invalid character. Please enter valid numeric characters only.')
+      return
+    }
+  }
+
+  const handlePhonePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pasted = e.clipboardData.getData('text')
+    if (/[a-zA-Z]/.test(pasted)) {
+      e.preventDefault()
+      const sanitized = pasted.replace(/[a-zA-Z]/g, '').replace(/[^\d+\s\-()]/g, '')
+      const input = e.currentTarget
+      const start = input.selectionStart || 0
+      const end = input.selectionEnd || 0
+      const newPhone = phone.slice(0, start) + sanitized + phone.slice(end)
+      setPhone(newPhone)
+      setPhoneError('Alphabetic characters are not allowed. Please enter valid numeric characters only.')
+    }
+  }
+
+  const handlePhoneChange = (val: string) => {
+    const hasAlphabetic = /[a-zA-Z]/.test(val)
+    const hasInvalid = hasAlphabetic || /[^\d+\s\-()]/.test(val)
+
+    // Restrict input to valid numeric phone characters
+    const sanitized = val.replace(/[a-zA-Z]/g, '').replace(/[^\d+\s\-()]/g, '')
+    setPhone(sanitized)
+
+    if (hasAlphabetic) {
+      setPhoneError('Alphabetic characters are not allowed. Please enter valid numeric characters only.')
+      return
+    }
+
+    if (hasInvalid) {
+      setPhoneError('Invalid character: Only numeric digits (0-9) and standard symbols (+, -, space) are allowed.')
+      return
+    }
+
+    if (sanitized.trim()) {
+      const err = validatePhone(sanitized)
+      setPhoneError(err)
+      if (!err && errorMsg?.toLowerCase().includes('phone')) {
+        setErrorMsg(null)
+      }
+    } else {
+      setPhoneError(null)
+      if (errorMsg?.toLowerCase().includes('phone')) {
+        setErrorMsg(null)
+      }
+    }
+  }
+
+  const handlePhoneBlur = () => {
+    if (phone.trim()) {
+      const err = validatePhone(phone)
+      setPhoneError(err)
+    }
+  }
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOffline(false)
+      setErrorMsg((prev) => (prev?.toLowerCase().includes('network') || prev?.toLowerCase().includes('offline') ? null : prev))
+    }
+    const handleOffline = () => {
+      setIsOffline(true)
+      setErrorMsg('Network connection unavailable. Please check your internet connection and try again.')
+    }
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    // Check actual connectivity on mount
+    isNetworkAvailable().then((online) => {
+      if (!online) {
+        setIsOffline(true)
+      }
+    })
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
 
   // Password strength calculation
   const getPasswordStrength = (pass: string) => {
@@ -55,18 +296,50 @@ export const RegisterView: React.FC = () => {
       return
     }
 
+    const nError = validateName(name)
+    if (nError) {
+      setErrorMsg(nError)
+      setNameError(nError)
+      return
+    }
+
+    if (nameError) {
+      setErrorMsg(nameError)
+      return
+    }
+
     if (password.length < 6) {
       setErrorMsg('Password must be at least 6 characters long.')
       return
     }
 
+    if (phone.trim()) {
+      const pError = validatePhone(phone)
+      if (pError) {
+        setErrorMsg(pError)
+        setPhoneError(pError)
+        return
+      }
+    } else if (phoneError) {
+      setErrorMsg(phoneError)
+      return
+    }
+
     setIsSubmitting(true)
     try {
+      // Block registration immediately if network connection is turned off / unavailable
+      const online = await isNetworkAvailable()
+      if (!online) {
+        setIsOffline(true)
+        setErrorMsg('Network connection unavailable. Please check your internet connection and try again.')
+        return
+      }
+
       const res = await signup({
         name: name.trim(),
         email: email.trim(),
         phone: phone.trim(),
-        role,
+        role: role ? (role as AdminRole) : undefined,
         password,
         inviteCode: inviteCode.trim(),
       })
@@ -161,9 +434,26 @@ export const RegisterView: React.FC = () => {
                 </button>
               </div>
 
+              {/* Offline Warning Banner */}
+              {isOffline && (
+                <div className="mb-4 p-3 bg-amber-50 border border-amber-200/80 rounded-xl flex items-start gap-2.5 text-amber-800 text-xs">
+                  <WifiOff className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Network Connection Unavailable</p>
+                    <p className="text-[11px] text-amber-700 mt-0.5">
+                      You are currently offline. Please reconnect to the internet to submit registration.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {errorMsg && (
                 <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2.5 text-rose-800 text-xs">
-                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  {errorMsg.toLowerCase().includes('network') || errorMsg.toLowerCase().includes('offline') ? (
+                    <WifiOff className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  )}
                   <span>{errorMsg}</span>
                 </div>
               )}
@@ -171,28 +461,46 @@ export const RegisterView: React.FC = () => {
               <form onSubmit={handleSubmit} className="space-y-3.5">
                 {/* Full Name */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Full Legal Name *
+                  <label htmlFor="name" className="block text-xs font-semibold text-slate-700 mb-1">
+                    Full Legal Name <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                       <User className="h-4 w-4" />
                     </div>
                     <input
+                      id="name"
+                      name="name"
                       type="text"
+                      autoComplete="name"
                       value={name}
-                      onChange={(e) => setName(e.target.value)}
+                      onChange={(e) => handleNameChange(e.target.value)}
+                      onKeyDown={handleNameKeyDown}
+                      onPaste={handleNamePaste}
+                      onBlur={handleNameBlur}
                       placeholder="e.g. Anand Chandran"
                       required
-                      className="block w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:bg-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-hidden font-medium"
+                      aria-invalid={!!nameError}
+                      aria-describedby={nameError ? 'name-error' : undefined}
+                      className={`block w-full pl-9 pr-3 py-2 bg-slate-50 border rounded-xl text-xs sm:text-sm focus:bg-white focus:ring-2 outline-hidden font-medium transition-colors ${
+                        nameError
+                          ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-500/20 text-rose-900'
+                          : 'border-slate-200 focus:border-orange-500 focus:ring-orange-500/20 text-slate-900'
+                      }`}
                     />
                   </div>
+                  {nameError && (
+                    <p id="name-error" className="mt-1 text-[11px] text-rose-600 flex items-center gap-1 font-medium">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{nameError}</span>
+                    </p>
+                  )}
                 </div>
 
                 {/* Work Email */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Official Work Email *
+                    Official Work Email <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
@@ -212,32 +520,53 @@ export const RegisterView: React.FC = () => {
                 {/* Phone & Role Grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Phone Number
+                    <label htmlFor="phone" className="block text-xs font-semibold text-slate-700 mb-1">
+                      Phone Number <span className="text-slate-400 font-normal">(Optional)</span>
                     </label>
                     <div className="relative">
                       <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                         <Phone className="h-4 w-4" />
                       </div>
                       <input
+                        id="phone"
+                        name="phone"
                         type="tel"
+                        inputMode="tel"
                         value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
+                        onChange={(e) => handlePhoneChange(e.target.value)}
+                        onKeyDown={handlePhoneKeyDown}
+                        onPaste={handlePhonePaste}
+                        onBlur={handlePhoneBlur}
                         placeholder="+91 98400..."
-                        className="block w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:bg-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-hidden font-medium"
+                        maxLength={25}
+                        pattern="[0-9+\s\-()]*"
+                        aria-invalid={!!phoneError}
+                        aria-describedby={phoneError ? 'phone-error' : undefined}
+                        className={`block w-full pl-9 pr-3 py-2 bg-slate-50 border rounded-xl text-xs sm:text-sm focus:bg-white focus:ring-2 outline-hidden font-medium transition-colors ${
+                          phoneError
+                            ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-500/20 text-rose-900'
+                            : 'border-slate-200 focus:border-orange-500 focus:ring-orange-500/20 text-slate-900'
+                        }`}
                       />
                     </div>
+                    {phoneError && (
+                      <p id="phone-error" className="mt-1 text-[11px] text-rose-600 flex items-center gap-1 font-medium">
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                        <span>{phoneError}</span>
+                      </p>
+                    )}
                   </div>
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Department / Role
+                      Department / Role <span className="text-slate-400 font-normal">(Optional)</span>
                     </label>
                     <select
                       value={role}
-                      onChange={(e) => setRole(e.target.value as AdminRole)}
+                      onChange={(e) => setRole(e.target.value as AdminRole | '')}
                       className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:bg-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-hidden font-medium cursor-pointer"
                     >
+                      <option value="">Select Department / Role (Optional)</option>
                       <option value="viewer">Staff Viewer (Read-only)</option>
                       <option value="inventory_manager">Inventory & Products</option>
                       <option value="sales_manager">Sales & Orders CRM</option>
@@ -249,7 +578,7 @@ export const RegisterView: React.FC = () => {
                 {/* Password Field */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Account Password *
+                    Account Password <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
@@ -290,7 +619,7 @@ export const RegisterView: React.FC = () => {
                 <div className="pt-1">
                   <div className="flex items-center justify-between mb-1">
                     <label className="block text-xs font-semibold text-slate-700">
-                      Company Invite / Master Passcode (Optional)
+                      Company Invite / Master Passcode <span className="text-slate-400 font-normal">(Optional)</span>
                     </label>
                     <span className="text-[10px] text-amber-600 font-medium">Instant Bypass</span>
                   </div>

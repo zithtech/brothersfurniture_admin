@@ -376,6 +376,7 @@ export type AdminView =
   | 'leads'
   | 'orders'
   | 'quotations'
+  | 'customers'
   | 'clients'
   | 'testimonials'
   | 'settings'
