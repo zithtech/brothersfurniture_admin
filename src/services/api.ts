@@ -174,8 +174,11 @@ export const api = {
   updateProposalStatus: (id: string, status: ProposalStatus) =>
     request<Proposal>(`/proposals/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }),
   deleteProposal: (id: string) => request<{ success: boolean; message: string }>(`/proposals/${id}`, { method: 'DELETE' }),
-  convertProposalToInvoice: (proposalId: string) =>
-    request<Invoice>(`/proposals/${proposalId}/convert-to-invoice`, { method: 'POST' }),
+  convertProposalToInvoice: (proposalId: string, invoiceData?: any) =>
+    request<Invoice>(`/proposals/${proposalId}/convert-to-invoice`, {
+      method: 'POST',
+      body: invoiceData ? JSON.stringify(invoiceData) : undefined,
+    }),
   generateProposalPdf: (id: string, fallback?: any) =>
     request<{ success: boolean; pdfUrl: string; r2Key: string; size: number; proposal?: Proposal }>(
       `/proposals/${id}/generate-pdf`,
