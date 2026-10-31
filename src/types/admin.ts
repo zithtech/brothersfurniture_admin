@@ -399,6 +399,8 @@ export interface InvoiceItem {
   hsnCode?: string // default "9403"
   quantity: number
   unitPrice: number
+  discountPercent?: number
+  discountAmount?: number
   material?: string
   dimensions?: string
   sku?: string

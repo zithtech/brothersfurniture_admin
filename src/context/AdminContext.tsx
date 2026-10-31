@@ -129,7 +129,7 @@ interface AdminContextType {
   updateProposal: (id: string, partial: Partial<Proposal>) => void
   deleteProposal: (id: string) => void
   updateProposalStatus: (id: string, status: ProposalStatus) => void
-  convertProposalToInvoice: (proposalId: string) => Invoice | null
+  convertProposalToInvoice: (proposalId: string) => Promise<Invoice | null>
   generateProposalPdf: (id: string, fallback?: Proposal) => Promise<string | null>
 
   // Invoices & Billing
@@ -1289,7 +1289,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }
 
-  const convertProposalToInvoice = (proposalId: string): Invoice | null => {
+  const convertProposalToInvoice = async (proposalId: string): Promise<Invoice | null> => {
     const proposal = proposals.find((p) => p.id === proposalId)
     if (!proposal) return null
 
@@ -1317,19 +1317,32 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       issueDate: new Date().toISOString().split('T')[0],
       dueDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       status: 'pending',
-      items: proposal.items.map((it, idx) => ({
-        id: `iitem-${Date.now()}-${idx}`,
-        productId: it.productId,
-        name: it.name,
-        image: it.image,
-        hsnCode: '9403',
-        quantity: it.quantity,
-        unitPrice: it.unitPrice,
-        material: it.material,
-        dimensions: it.dimensions,
-        sku: it.sku,
-        total: it.total,
-      })),
+      items: proposal.items.map((it, idx) => {
+        const itemDiscPct = it.discountPercent !== undefined && Number(it.discountPercent) > 0
+          ? Number(it.discountPercent)
+          : (proposal.discountPercent ? Number(proposal.discountPercent) : 0)
+        const gross = (Number(it.quantity) || 1) * (Number(it.unitPrice) || 0)
+        const itemDiscAmt = it.discountAmount !== undefined && Number(it.discountAmount) > 0
+          ? Number(it.discountAmount)
+          : (itemDiscPct > 0 ? Math.round((gross * itemDiscPct) / 100) : 0)
+        const itemTot = it.total !== undefined ? Number(it.total) : Math.max(0, gross - itemDiscAmt)
+
+        return {
+          id: `iitem-${Date.now()}-${idx}`,
+          productId: it.productId,
+          name: it.name,
+          image: it.image,
+          hsnCode: '9403',
+          quantity: it.quantity,
+          unitPrice: it.unitPrice,
+          discountPercent: itemDiscPct,
+          discountAmount: itemDiscAmt,
+          material: it.material,
+          dimensions: it.dimensions,
+          sku: it.sku,
+          total: itemTot,
+        }
+      }),
       subtotal: proposal.subtotal,
       discountAmount: proposal.discountAmount || 0,
       deliveryFee: proposal.deliveryFee,
@@ -1347,15 +1360,36 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     setInvoices((prev) => [newInvoice, ...prev])
     updateProposal(proposalId, { status: 'converted', convertedInvoiceId: newInvoice.id })
-    addToast('success', 'Tax Invoice Generated', `Invoice ${invoiceNumber} created from Proposal ${proposal.proposalNumber}.`)
 
     if (isBackendConnected) {
-      api.convertProposalToInvoice(proposalId).catch((err) => {
-        // Fallback: create invoice directly if convert endpoint didn't find proposal in db yet
+      try {
+        const saved = await api.convertProposalToInvoice(proposalId, newInvoice)
+        if (saved) {
+          const merged = { ...newInvoice, ...saved }
+          setInvoices((prev) =>
+            prev.map((item) => (item.id === newInvoice.id ? merged : item))
+          )
+          addToast('success', 'Tax Invoice Generated', `Invoice ${merged.invoiceNumber} created from Proposal ${proposal.proposalNumber}.`)
+          return merged
+        }
+      } catch (err) {
         console.warn('Convert endpoint error, syncing direct invoice:', err)
-        api.createInvoice(newInvoice).catch(() => {})
-      })
+        try {
+          const directSaved = await api.createInvoice(newInvoice)
+          if (directSaved) {
+            const merged = { ...newInvoice, ...directSaved }
+            setInvoices((prev) =>
+              prev.map((item) => (item.id === newInvoice.id ? merged : item))
+            )
+            return merged
+          }
+        } catch (createErr) {
+          console.error('Direct invoice sync also failed:', createErr)
+        }
+      }
     }
+
+    addToast('success', 'Tax Invoice Generated', `Invoice ${invoiceNumber} created from Proposal ${proposal.proposalNumber}.`)
     return newInvoice
   }
 

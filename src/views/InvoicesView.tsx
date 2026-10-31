@@ -16,10 +16,12 @@ import {
   FileSpreadsheet,
   Grid,
   Landmark,
+  Layers,
   List,
   Loader2,
   MessageCircle,
   MoreVertical,
+  Package,
   Plus,
   Printer,
   Receipt,
@@ -27,11 +29,14 @@ import {
   Search,
   Send,
   Trash2,
-  X,
 } from 'lucide-react'
+import { Drawer } from '../components/common/Drawer'
 import { Modal } from '../components/common/Modal'
+import { SearchableSelect, type SelectOption } from '../components/common/SearchableSelect'
 import { useAdmin } from '../context/AdminContext'
+import { customerApi } from '../services/customerApi'
 import type { Invoice, InvoiceItem, InvoiceStatus, PaymentMode, Product } from '../types/admin'
+import type { Customer } from '../types/customer'
 import logoImg from '../assets/logo.png'
 
 export const InvoicesView: React.FC = () => {
@@ -39,6 +44,9 @@ export const InvoicesView: React.FC = () => {
     invoices,
     products,
     productTypes,
+    chairs,
+    typeCategoriesMap,
+    categorySubcategoriesMap,
     addInvoice,
     updateInvoice,
     deleteInvoice,
@@ -123,6 +131,109 @@ export const InvoicesView: React.FC = () => {
     })
   }, [invoices, statusFilter, searchQuery])
 
+  // Customer selection from Customer page
+  const [customersList, setCustomersList] = useState<Customer[]>([])
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('')
+
+  // Load Customers from Customer Page API
+  useEffect(() => {
+    let isMounted = true
+    const loadCustomers = async () => {
+      try {
+        const res = await customerApi.getCustomers({ limit: 100, sortBy: 'company_name', sortOrder: 'asc' })
+        if (isMounted && res?.items) {
+          setCustomersList(res.items)
+        }
+      } catch (err) {
+        console.warn('Could not load customers for invoice dropdown:', err)
+      }
+    }
+    loadCustomers()
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  const customerOptions: SelectOption[] = useMemo(() => {
+    return customersList.map((c) => {
+      const contactInfo = [
+        c.customerCode,
+        c.primaryContact?.name ? `Contact: ${c.primaryContact.name}` : null,
+        c.companyPhone ? `✆ ${c.companyPhone}` : null,
+        c.primaryAddress?.city ? `📍 ${c.primaryAddress.city}` : null,
+      ]
+        .filter(Boolean)
+        .join(' • ')
+
+      return {
+        value: c.id,
+        label: c.companyName || c.primaryContact?.name || c.customerCode,
+        description: contactInfo,
+        initials: (c.companyName || c.primaryContact?.name || 'CU').slice(0, 2).toUpperCase(),
+        badgeColor: 'bg-blue-600 text-white',
+      }
+    })
+  }, [customersList])
+
+  const handleCustomerSelect = async (customerId: string) => {
+    setSelectedCustomerId(customerId)
+    if (!customerId) return
+    const customer = customersList.find((c) => c.id === customerId)
+    if (!customer) return
+
+    let billingAddr = ''
+    let shippingAddr = ''
+    if (customer.primaryAddress) {
+      const pa = customer.primaryAddress
+      billingAddr = [pa.addressLine1, pa.city, pa.state, pa.pinCode].filter(Boolean).join(', ')
+      shippingAddr = billingAddr
+    }
+
+    try {
+      const full = await customerApi.getCustomerById(customerId)
+      if (full) {
+        const bill = full.addresses?.find((a) => a.isDefault || a.addressType === 'billing') || full.addresses?.[0]
+        const ship = full.addresses?.find((a) => a.addressType === 'shipping') || bill
+        if (bill) {
+          billingAddr = [bill.addressLine1, bill.addressLine2, bill.city, bill.state, bill.pinCode]
+            .filter(Boolean)
+            .join(', ')
+        }
+        if (ship) {
+          shippingAddr = [ship.addressLine1, ship.addressLine2, ship.city, ship.state, ship.pinCode]
+            .filter(Boolean)
+            .join(', ')
+        }
+        const primaryContact = full.contacts?.find((ct) => ct.isPrimary) || full.contacts?.[0]
+
+        setInvoiceForm((prev) => ({
+          ...prev,
+          customerName: primaryContact?.name || full.companyName || prev.customerName,
+          companyName: full.companyName || '',
+          phone: primaryContact?.phone || full.companyPhone || prev.phone,
+          email: primaryContact?.email || full.companyEmail || prev.email,
+          clientGstin: full.gstNumber || prev.clientGstin,
+          billingAddress: billingAddr || prev.billingAddress,
+          shippingAddress: shippingAddr || billingAddr || prev.shippingAddress,
+        }))
+        return
+      }
+    } catch {
+      // fallback to list item
+    }
+
+    setInvoiceForm((prev) => ({
+      ...prev,
+      customerName: customer.primaryContact?.name || customer.companyName || prev.customerName,
+      companyName: customer.companyName || '',
+      phone: customer.primaryContact?.phone || customer.companyPhone || prev.phone,
+      email: customer.companyEmail || customer.primaryContact?.email || prev.email,
+      clientGstin: customer.gstNumber || prev.clientGstin,
+      billingAddress: billingAddr || prev.billingAddress,
+      shippingAddress: shippingAddr || billingAddr || prev.shippingAddress,
+    }))
+  }
+
   // --- New Direct Invoice State (Empty by default) ---
   const [invoiceForm, setInvoiceForm] = useState({
     customerName: '',
@@ -138,54 +249,239 @@ export const InvoicesView: React.FC = () => {
     notes: '',
   })
 
-  // Filter for Invoice quick-add items
+  // Selected filters for the item picker (Product Catalog Selector)
   const [pickerType, setPickerType] = useState<string>('All')
+  const [pickerCategory, setPickerCategory] = useState<string>('All')
+  const [pickerSubCategory, setPickerSubCategory] = useState<string>('All')
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
+  const [showAllCatalogInProducts, setShowAllCatalogInProducts] = useState(false)
+  const [lastAddedAlert, setLastAddedAlert] = useState<{ name: string; qty: number } | null>(null)
 
   const [builderItems, setBuilderItems] = useState<InvoiceItem[]>([])
 
-  const matchingCatalogProducts = useMemo(() => {
-    return products.filter((p) => {
-      const matchType =
-        pickerType === 'All' ||
-        (p.type && p.type.toLowerCase() === pickerType.toLowerCase()) ||
-        (!p.type && pickerType.toLowerCase() === 'chairs' && p.category.toLowerCase().includes('chair')) ||
-        (!p.type && pickerType.toLowerCase() === 'tables' && (p.category.toLowerCase().includes('table') || p.category.toLowerCase().includes('desk'))) ||
-        (!p.type && pickerType.toLowerCase() === 'workstations' && p.category.toLowerCase().includes('workstation'))
-      return matchType
-    })
-  }, [products, pickerType])
-
-  const handleAddItemFromProduct = (p: Product) => {
-    const qty = p.minOrderQuantity || 1
-    const newItem: InvoiceItem = {
-      id: `iitem-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      productId: p.id,
-      name: p.name,
-      image: p.image || '/products/chairs/chair-placeholder.webp',
-      hsnCode: '9403',
-      quantity: qty,
-      unitPrice: p.price,
-      total: p.price * qty,
-      material: p.material || '',
-      dimensions: p.dimensions || '',
-      sku: p.sku,
-    }
-    setBuilderItems((prev) => [...prev, newItem])
+  // Map chair models to catalog products using standard chair types
+  const CHAIR_TYPE_SUBCAT_MAP: Record<string, string> = {
+    'high-back': 'Ergonomic Chairs',
+    'medium-back': 'Task Chairs',
+    'mesh-seat': 'Mesh Office Chairs',
+    visitor: 'Staff Chairs',
   }
 
-  const handleUpdateItem = (index: number, field: keyof InvoiceItem, value: any) => {
+  // Unified Catalog (Products + Ergonomic Chairs)
+  const allCatalogProducts = useMemo<Product[]>(() => {
+    const chairProducts: Product[] = (chairs || []).map((c) => ({
+      id: `chair-${c.id}`,
+      sku: `BF-ERGO-${c.id.replace(/[^a-zA-Z0-9]/g, '').substring(0, 8).toUpperCase()}`,
+      name: c.name,
+      type: 'Chairs',
+      category: 'Office Chairs',
+      subCategory: CHAIR_TYPE_SUBCAT_MAP[c.type] || 'Ergonomic Chairs',
+      price: c.basePrice || 18500,
+      image: c.image || '/products/chairs/chair-placeholder.webp',
+      description: c.features?.join(' • ') || 'Commercial ergonomic task chair with posture adjustment.',
+      material: 'High-density foam, breathable mesh, alloy star base',
+      dimensions: 'W 65 × D 65 × H 115–125 cm',
+      inStock: c.inProduction !== false,
+      featured: false,
+      stockCount: 50,
+      minOrderQuantity: 1,
+      rating: 4.8,
+      updatedAt: '2026-10-20T00:00:00Z',
+    }))
+
+    const catalog = [...products]
+    for (const cp of chairProducts) {
+      if (!catalog.some((item) => item.id === cp.id || item.name.toLowerCase() === cp.name.toLowerCase())) {
+        catalog.push(cp)
+      }
+    }
+    return catalog
+  }, [products, chairs])
+
+  // Filtered available categories dynamically based on pickerType
+  const availableCategories = useMemo(() => {
+    if (pickerType === 'All') {
+      return Array.from(new Set(allCatalogProducts.map((p) => p.category).filter(Boolean)))
+    }
+    const taxonomyCats = typeCategoriesMap[pickerType] || []
+    const catalogCats = allCatalogProducts
+      .filter((p) => (p.type || '').toLowerCase() === pickerType.toLowerCase())
+      .map((p) => p.category)
+      .filter(Boolean)
+    return Array.from(new Set([...taxonomyCats, ...catalogCats]))
+  }, [pickerType, allCatalogProducts, typeCategoriesMap])
+
+  // Filtered available sub-categories dynamically based on pickerCategory & pickerType
+  const availableSubCategories = useMemo(() => {
+    if (pickerCategory === 'All') {
+      const pool =
+        pickerType === 'All'
+          ? allCatalogProducts
+          : allCatalogProducts.filter((p) => (p.type || '').toLowerCase() === pickerType.toLowerCase())
+      return Array.from(new Set(pool.map((p) => p.subCategory).filter(Boolean) as string[]))
+    }
+    const taxonomySubs = categorySubcategoriesMap[pickerCategory] || []
+    const catalogSubs = allCatalogProducts
+      .filter((p) => (p.category || '').toLowerCase() === pickerCategory.toLowerCase() && p.subCategory)
+      .map((p) => p.subCategory as string)
+    return Array.from(new Set([...taxonomySubs, ...catalogSubs]))
+  }, [pickerType, pickerCategory, allCatalogProducts, categorySubcategoriesMap])
+
+  // Dynamic filter matching Type, Category, Sub-Category
+  const matchingCatalogProducts = useMemo(() => {
+    return allCatalogProducts.filter((p) => {
+      // 1. Type Match
+      if (pickerType !== 'All') {
+        const matchesType = (p.type || '').toLowerCase() === pickerType.toLowerCase()
+        const isCatInType = (typeCategoriesMap[pickerType] || []).some(
+          (cat) => cat.toLowerCase() === (p.category || '').toLowerCase()
+        )
+        if (!matchesType && !isCatInType) return false
+      }
+
+      // 2. Category Match
+      if (pickerCategory !== 'All') {
+        if ((p.category || '').toLowerCase() !== pickerCategory.toLowerCase()) return false
+      }
+
+      // 3. Sub-Category Match
+      if (pickerSubCategory !== 'All') {
+        if ((p.subCategory || '').toLowerCase() !== pickerSubCategory.toLowerCase()) return false
+      }
+
+      return true
+    })
+  }, [allCatalogProducts, pickerType, pickerCategory, pickerSubCategory, typeCategoriesMap])
+
+  // Memoized SearchableSelect Options
+  const typeSelectOptions = useMemo(() => {
+    return [
+      { value: 'All', label: `All Types (${productTypes.length})` },
+      ...productTypes.map((t) => ({ value: t, label: t })),
+    ]
+  }, [productTypes])
+
+  const categorySelectOptions = useMemo(() => {
+    return [
+      { value: 'All', label: `All Categories (${availableCategories.length})` },
+      ...availableCategories.map((c) => ({ value: c, label: c })),
+    ]
+  }, [availableCategories])
+
+  const subCategorySelectOptions = useMemo(() => {
+    return [
+      { value: 'All', label: `All Sub-Categories (${availableSubCategories.length})` },
+      ...availableSubCategories.map((s) => ({ value: s, label: s })),
+    ]
+  }, [availableSubCategories])
+
+  const currentProductList = useMemo(() => {
+    return showAllCatalogInProducts ? allCatalogProducts : matchingCatalogProducts
+  }, [showAllCatalogInProducts, allCatalogProducts, matchingCatalogProducts])
+
+  const productSelectOptions = useMemo(() => {
+    const allIds = currentProductList.map((p) => p.id)
+    const isAllSelected = allIds.length > 0 && allIds.every((id) => selectedProductIds.includes(id))
+
+    return [
+      {
+        value: '__all__',
+        label: `★ All Products (${currentProductList.length})`,
+        description: isAllSelected
+          ? `All ${currentProductList.length} products currently chosen`
+          : `Click to choose all ${currentProductList.length} products at once`,
+        badgeColor: 'bg-blue-600 text-white',
+        initials: 'ALL',
+      },
+      ...currentProductList.map((p) => ({
+        value: p.id,
+        label: p.name,
+        description: `₹${p.price.toLocaleString('en-IN')} • ${p.subCategory || p.category}`,
+      })),
+    ]
+  }, [currentProductList, selectedProductIds])
+
+  const handleAddProductToInvoice = (prod: Product) => {
+    setBuilderItems((prev) => {
+      const existingIdx = prev.findIndex(
+        (item) => item.productId === prod.id || item.name.toLowerCase() === prod.name.toLowerCase()
+      )
+      if (existingIdx >= 0) {
+        const copy = [...prev]
+        const current = copy[existingIdx]
+        const nextQty = (current.quantity || 1) + 1
+        const unitPrice = current.unitPrice || 0
+        const dPct = current.discountPercent || 0
+        const gross = nextQty * unitPrice
+        const dAmt = Math.round((gross * dPct) / 100)
+        copy[existingIdx] = {
+          ...current,
+          quantity: nextQty,
+          discountPercent: dPct,
+          discountAmount: dAmt,
+          total: Math.max(0, gross - dAmt),
+        }
+        setLastAddedAlert({ name: prod.name, qty: nextQty })
+        return copy
+      }
+
+      const newItem: InvoiceItem = {
+        id: `iitem-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        productId: prod.id,
+        name: prod.name,
+        image: prod.image || (prod.images && prod.images[0]?.url) || '/products/chairs/chair-placeholder.webp',
+        hsnCode: '9403',
+        quantity: 1,
+        unitPrice: prod.price,
+        discountPercent: 0,
+        discountAmount: 0,
+        total: prod.price * 1,
+        material: prod.material || 'Commercial grade alloy & engineered materials',
+        dimensions: prod.dimensions || 'Standard commercial dimensions',
+        sku: prod.sku,
+      }
+      setLastAddedAlert({ name: prod.name, qty: 1 })
+      return [...prev, newItem]
+    })
+  }
+
+  const handleAddSelectedProducts = () => {
+    if (selectedProductIds.length === 0) return
+    const prodsToAdd = allCatalogProducts.filter((p) => selectedProductIds.includes(p.id))
+    if (prodsToAdd.length === 0) return
+
+    prodsToAdd.forEach((prod) => handleAddProductToInvoice(prod))
+    setLastAddedAlert({
+      name: prodsToAdd.length === 1 ? prodsToAdd[0].name : `${prodsToAdd.length} products`,
+      qty: prodsToAdd.length,
+    })
+    setSelectedProductIds([])
+  }
+
+  const handleUpdateItemProperty = (index: number, field: keyof InvoiceItem, value: any) => {
     setBuilderItems((prev) =>
       prev.map((item, idx) => {
         if (idx !== index) return item
         const updated = { ...item, [field]: value }
-        if (field === 'quantity' || field === 'unitPrice') {
+        if (field === 'quantity' || field === 'unitPrice' || field === 'discountPercent') {
           const q = Number(field === 'quantity' ? value : updated.quantity) || 0
           const p = Number(field === 'unitPrice' ? value : updated.unitPrice) || 0
-          updated.total = q * p
+          const dPct = Math.max(0, Math.min(100, Number(field === 'discountPercent' ? value : updated.discountPercent) || 0))
+          const gross = q * p
+          const dAmt = Math.round((gross * dPct) / 100)
+          updated.quantity = q
+          updated.unitPrice = p
+          updated.discountPercent = dPct
+          updated.discountAmount = dAmt
+          updated.total = Math.max(0, gross - dAmt)
         }
         return updated
       })
     )
+  }
+
+  const handleRemoveBuilderItem = (index: number) => {
+    setBuilderItems((prev) => prev.filter((_, i) => i !== index))
   }
 
   // Live calculation
@@ -198,6 +494,15 @@ export const InvoicesView: React.FC = () => {
 
   const handleOpenEditInvoice = (inv: Invoice) => {
     setEditingInvoiceId(inv.id)
+    const matched = customersList.find(
+      (c) =>
+        (inv.companyName && c.companyName?.toLowerCase() === inv.companyName.toLowerCase()) ||
+        (inv.customerName &&
+          (c.primaryContact?.name?.toLowerCase() === inv.customerName.toLowerCase() ||
+            c.companyName?.toLowerCase() === inv.customerName.toLowerCase())) ||
+        (inv.clientGstin && c.gstNumber && c.gstNumber.toLowerCase() === inv.clientGstin.toLowerCase())
+    )
+    setSelectedCustomerId(matched?.id || '')
     setInvoiceForm({
       customerName: inv.customerName || '',
       companyName: inv.companyName || '',
@@ -217,6 +522,13 @@ export const InvoicesView: React.FC = () => {
 
   const handleOpenCreateInvoice = () => {
     setEditingInvoiceId(null)
+    setSelectedCustomerId('')
+    setPickerType('All')
+    setPickerCategory('All')
+    setPickerSubCategory('All')
+    setSelectedProductIds([])
+    setShowAllCatalogInProducts(false)
+    setLastAddedAlert(null)
     setInvoiceForm({
       customerName: '',
       companyName: '',
@@ -274,15 +586,48 @@ export const InvoicesView: React.FC = () => {
         total: grandTotal,
         balanceDue: newBalanceDue,
         notes: invoiceForm.notes,
+        pdfUrl: undefined, // Clear stale PDF cache
+        r2Key: undefined,
       }
+
+      const updatedFullInvoice: Invoice = {
+        ...existingInv,
+        ...updatePayload,
+      } as Invoice
 
       updateInvoice(editingInvoiceId, updatePayload)
       if (selectedInvoice?.id === editingInvoiceId) {
-        setSelectedInvoice({
-          ...selectedInvoice,
-          ...updatePayload,
-        } as Invoice)
+        setSelectedInvoice(updatedFullInvoice)
       }
+
+      setIsCreateModalOpen(false)
+      setEditingInvoiceId(null)
+      setSelectedCustomerId('')
+      setInvoiceForm({
+        customerName: '',
+        companyName: '',
+        phone: '',
+        email: '',
+        clientGstin: '',
+        billingAddress: '',
+        shippingAddress: '',
+        poNumber: '',
+        proposalRef: '',
+        dueDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        notes: '',
+      })
+      setBuilderItems([])
+
+      // Automatically regenerate PDF after updating products and invoice details
+      generateInvoicePdf(editingInvoiceId, updatedFullInvoice)
+        .then((newPdfUrl) => {
+          if (newPdfUrl && selectedInvoice?.id === editingInvoiceId) {
+            setSelectedInvoice((prev) => (prev ? { ...prev, pdfUrl: newPdfUrl } : null))
+          }
+        })
+        .catch((err) => console.error('Failed to regenerate invoice PDF after update:', err))
+
+      return
     } else {
       const newInv = await addInvoice({
         proposalRef: invoiceForm.proposalRef || undefined,
@@ -311,10 +656,16 @@ export const InvoicesView: React.FC = () => {
         notes: invoiceForm.notes,
       })
       setSelectedInvoice(newInv)
+
+      // Automatically generate PDF for new invoice in background
+      generateInvoicePdf(newInv.id, newInv).catch((err) =>
+        console.error('Failed to generate PDF for new invoice:', err)
+      )
     }
 
     setIsCreateModalOpen(false)
     setEditingInvoiceId(null)
+    setSelectedCustomerId('')
     setInvoiceForm({
       customerName: '',
       companyName: '',
@@ -386,27 +737,65 @@ export const InvoicesView: React.FC = () => {
         }
       }
 
-      // Fetch file attachment directly so it downloads to computer without blank tabs
-      const downloadEndpoint = `/api/invoices/${inv.id}/download-pdf`
-      const res = await fetch(downloadEndpoint)
-      if (res.ok) {
-        const blob = await res.blob()
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `${inv.invoiceNumber || 'invoice'}.pdf`
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        window.URL.revokeObjectURL(url)
-      } else if (targetPdfUrl) {
-        const a = document.createElement('a')
-        a.href = targetPdfUrl
-        a.download = `${inv.invoiceNumber || 'invoice'}.pdf`
-        a.target = '_blank'
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
+      const fileName = `${inv.invoiceNumber || 'invoice'}.pdf`
+      let downloaded = false
+
+      // 1. Direct blob fetch from Cloudflare R2 if available (instant download)
+      if (targetPdfUrl) {
+        try {
+          const res = await fetch(targetPdfUrl)
+          if (res.ok) {
+            const blob = await res.blob()
+            const blobUrl = window.URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = blobUrl
+            link.download = fileName
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
+            setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000)
+            downloaded = true
+          }
+        } catch (e) {
+          console.warn('Direct R2 blob fetch failed, trying backend download endpoint...', e)
+        }
+      }
+
+      // 2. Fetch from backend download endpoint (with fallback POST if GET 404)
+      if (!downloaded) {
+        const backendBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+        const downloadApiUrl = `${backendBase}/invoices/${inv.id}/download-pdf`
+        try {
+          let res = await fetch(downloadApiUrl)
+          if (!res.ok) {
+            // Send invoice fallback in POST body so backend can generate on the fly
+            res = await fetch(downloadApiUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(inv),
+            })
+          }
+          if (res.ok) {
+            const blob = await res.blob()
+            const blobUrl = window.URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = blobUrl
+            link.download = fileName
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
+            setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000)
+            downloaded = true
+          }
+        } catch (e) {
+          console.error('Backend endpoint download failed...', e)
+        }
+      }
+
+      // 3. Fallback: open in new tab if direct download couldn't trigger
+      if (!downloaded && targetPdfUrl) {
+        window.open(targetPdfUrl, '_blank')
+        downloaded = true
       }
     } catch (err) {
       console.error('Failed to download invoice PDF:', err)
@@ -450,8 +839,10 @@ export const InvoicesView: React.FC = () => {
   // ----------------------------------------------------
   // SUB-RENDERERS (MODALS & DOCUMENT)
   // ----------------------------------------------------
+  // 3. INVOICE BUILDER SLIDE-OVER DRAWER
+  // ----------------------------------------------------
   const renderInvoiceBuilderModal = () => (
-    <Modal
+    <Drawer
       isOpen={isCreateModalOpen}
       onClose={() => {
         setIsCreateModalOpen(false)
@@ -467,13 +858,44 @@ export const InvoicesView: React.FC = () => {
           ? 'Modify line items, quantities, pricing, and client billing details'
           : 'Create an itemized tax invoice with HSN 9403, CGST/SGST calculations and product photos'
       }
-      maxWidth="max-w-4xl"
+      maxWidth="max-w-2xl sm:max-w-3xl lg:max-w-4xl xl:max-w-5xl"
     >
       <form onSubmit={handleSaveInvoice} className="space-y-4">
         <div className="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/80 space-y-3">
-          <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-            Client & Billing Information
-          </h4>
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+              Client & Billing Information
+            </h4>
+            <span className="text-[11px] text-slate-500">Pick from customer directory or type manually</span>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-semibold text-slate-700">
+                Select from Customer Directory
+              </label>
+              {selectedCustomerId && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedCustomerId('')}
+                  className="text-[10px] text-blue-600 hover:text-blue-700 font-medium cursor-pointer"
+                >
+                  Clear / Manual Entry
+                </button>
+              )}
+            </div>
+            <SearchableSelect
+              value={selectedCustomerId}
+              onChange={handleCustomerSelect}
+              options={customerOptions}
+              placeholder="Choose existing customer (auto-fills details below) or type manually..."
+              clearable
+              onClear={() => setSelectedCustomerId('')}
+              accentColor="blue"
+              prefixIcon={<Building2 className="w-3.5 h-3.5 text-slate-400" />}
+            />
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="text-[11px] font-semibold text-slate-700 block mb-1">
@@ -610,109 +1032,366 @@ export const InvoicesView: React.FC = () => {
           </div>
         </div>
 
-        {/* Product selector */}
-        <div className="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/80 space-y-2.5">
+        {/* PRODUCT PICKER BAR (TYPE > CATEGORY > SUB-CATEGORY > CHOOSE PRODUCT + ADD BUTTON) */}
+        <div className="p-3.5 bg-gradient-to-r from-blue-50/80 to-indigo-50/50 rounded-xl border border-blue-200/80 space-y-3 shadow-2xs">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-              Itemized Line Products (HSN 9403)
-            </h4>
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-              {['All', ...productTypes].slice(0, 5).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setPickerType(t)}
-                  className={`px-2 py-0.5 rounded text-[10.5px] font-medium transition cursor-pointer ${
-                    pickerType.toLowerCase() === t.toLowerCase()
-                      ? 'bg-slate-900 text-white'
-                      : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
+            <div>
+              <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                <Package className="w-3.5 h-3.5 text-blue-600" />
+                Product Catalog Selector
+              </h4>
+              <p className="text-[11px] text-slate-600">
+                Select <strong>Type</strong> &rarr; <strong>Category</strong> &rarr; <strong>Sub-category</strong> &rarr; <strong>Choose Product</strong>, then click <strong>Add</strong>.
+              </p>
+            </div>
+            {matchingCatalogProducts.length === 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setPickerType('All')
+                  setPickerCategory('All')
+                  setPickerSubCategory('All')
+                  setSelectedProductIds([])
+                }}
+                className="text-[11px] font-bold text-blue-600 hover:text-blue-700 underline cursor-pointer shrink-0"
+              >
+                Reset Filters
+              </button>
+            )}
+          </div>
+
+          {/* Tier 1: 3 Cascaded Taxonomy Filters (Type -> Category -> Sub-Category) */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* 1. Type */}
+            <div>
+              <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                1. Product Type
+              </label>
+              <SearchableSelect
+                value={pickerType}
+                onChange={(val) => {
+                  setPickerType(val)
+                  setPickerCategory('All')
+                  setPickerSubCategory('All')
+                  setSelectedProductIds([])
+                }}
+                options={typeSelectOptions}
+                clearable={false}
+                placeholder="Select Type..."
+                searchPlaceholder="Search product type..."
+                accentColor="blue"
+              />
+            </div>
+
+            {/* 2. Category */}
+            <div>
+              <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                2. Category
+              </label>
+              <SearchableSelect
+                value={pickerCategory}
+                onChange={(val) => {
+                  setPickerCategory(val)
+                  setPickerSubCategory('All')
+                  setSelectedProductIds([])
+                }}
+                options={categorySelectOptions}
+                clearable={false}
+                placeholder="Select Category..."
+                searchPlaceholder="Search category..."
+                accentColor="blue"
+              />
+            </div>
+
+            {/* 3. Sub-Category */}
+            <div>
+              <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                3. Sub-Category
+              </label>
+              <SearchableSelect
+                value={pickerSubCategory}
+                onChange={(val) => {
+                  setPickerSubCategory(val)
+                  setSelectedProductIds([])
+                }}
+                options={subCategorySelectOptions}
+                clearable={false}
+                placeholder="Select Sub-Category..."
+                searchPlaceholder="Search sub-category..."
+                accentColor="blue"
+              />
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <select
-              value=""
-              onChange={(e) => {
-                const prod = products.find((p) => p.id === e.target.value)
-                if (prod) handleAddItemFromProduct(prod)
-              }}
-              className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 outline-none focus:border-orange-500 font-medium"
-            >
-              <option value="" disabled>
-                + Click to Add Matching Catalog Product ({matchingCatalogProducts.length})
-              </option>
-              {matchingCatalogProducts.map((p) => (
-                <option key={p.id} value={p.id} className="bg-white text-slate-800 font-normal">
-                  {p.name} — ₹{p.price.toLocaleString('en-IN')}
-                </option>
-              ))}
-            </select>
+          {/* Tier 2: Dedicated Hero Card for Choose Products */}
+          <div className="p-3 bg-white/95 rounded-xl border border-blue-200/90 shadow-2xs space-y-2.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[11.5px] font-bold text-slate-900 flex items-center gap-1.5">
+                  <span className="w-5 h-5 rounded-full bg-blue-600 text-white font-bold text-[10px] flex items-center justify-center shadow-2xs">
+                    4
+                  </span>
+                  Choose Products
+                </span>
+                <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-200">
+                  {currentProductList.length} products available
+                </span>
+                {selectedProductIds.length > 0 && (
+                  <span className="text-[10.5px] font-bold text-blue-800 bg-blue-100 px-2.5 py-0.5 rounded-full border border-blue-300 animate-fadeIn">
+                    {selectedProductIds.length} selected
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2.5 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allIds = currentProductList.map((p) => p.id)
+                    const isAllSelected = allIds.length > 0 && allIds.every((id) => selectedProductIds.includes(id))
+                    setSelectedProductIds(isAllSelected ? [] : allIds)
+                  }}
+                  className="font-bold text-blue-600 hover:text-blue-700 hover:underline cursor-pointer flex items-center gap-1"
+                >
+                  {selectedProductIds.length > 0 &&
+                    currentProductList.length > 0 &&
+                    currentProductList.every((p) => selectedProductIds.includes(p.id)) ? (
+                    <>
+                      <RotateCcw className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Deselect All</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-blue-600 stroke-[3]" />
+                      <span>Select All ({currentProductList.length})</span>
+                    </>
+                  )}
+                </button>
+
+                {(pickerType !== 'All' || pickerCategory !== 'All' || pickerSubCategory !== 'All') && (
+                  <>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowAllCatalogInProducts(!showAllCatalogInProducts)}
+                      className={`font-semibold cursor-pointer text-[10.5px] px-2 py-0.5 rounded transition ${showAllCatalogInProducts
+                          ? 'bg-blue-50 text-blue-700 font-bold border border-blue-200'
+                          : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                        }`}
+                      title="Toggle view between filtered subset and full catalog"
+                    >
+                      {showAllCatalogInProducts ? 'Showing All Catalog' : 'View All Catalog'}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Full-width Searchable Dropdown & Add Button */}
+            <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center">
+              <div className="flex-1 min-w-0">
+                <SearchableSelect
+                  isMulti={true}
+                  multiValue={selectedProductIds}
+                  onMultiChange={setSelectedProductIds}
+                  options={productSelectOptions}
+                  clearable={true}
+                  placeholder={
+                    currentProductList.length > 0
+                      ? `Search and select products (${currentProductList.length} available)...`
+                      : 'No products available'
+                  }
+                  searchPlaceholder="Type product name, category, or SKU..."
+                  footerCountLabel="products"
+                  accentColor="blue"
+                  disabled={currentProductList.length === 0}
+                />
+              </div>
+
+              <button
+                type="button"
+                disabled={selectedProductIds.length === 0}
+                onClick={handleAddSelectedProducts}
+                className="h-[40px] px-5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition disabled:bg-slate-200 disabled:text-slate-400 disabled:from-slate-200 disabled:to-slate-200 disabled:cursor-not-allowed cursor-pointer shrink-0 inline-flex items-center justify-center gap-1.5 whitespace-nowrap active:scale-[0.98]"
+              >
+                <Plus className="w-4 h-4 stroke-[2.5]" />
+                <span>
+                  Add to Invoice {selectedProductIds.length > 0 ? `(${selectedProductIds.length})` : ''}
+                </span>
+              </button>
+            </div>
           </div>
+
+          {/* Instant feedback strip */}
+          {lastAddedAlert && (
+            <div className="pt-1 border-t border-blue-200/60 flex items-center justify-between">
+              <div className="px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-[11px] font-medium flex items-center gap-1.5 animate-fadeIn">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>
+                  Added <strong>{lastAddedAlert.name}</strong> to invoice items below!
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Line items */}
-        {builderItems.length === 0 ? (
-          <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50 space-y-2">
-            <Receipt className="w-8 h-8 text-slate-300 mx-auto" />
-            <p className="text-xs font-semibold text-slate-700">No products added to invoice yet</p>
-            <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
-              Choose a product from the quick catalog dropdown above to add items to this invoice.
-            </p>
+        {/* INVOICE ITEMS TABLE / BUILDER LIST (WITH PRODUCT IMAGES & HSN 9403) */}
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-blue-600" />
+              Itemized Line Products ({builderItems.length})
+            </h4>
+            <span className="text-[11px] text-slate-500">
+              Product images, HSN 9403, dimensions & materials auto-filled
+            </span>
           </div>
-        ) : (
-          <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-            {builderItems.map((item, idx) => (
-              <div
-                key={idx}
-                className="p-2.5 rounded-lg border border-slate-200 bg-white flex items-center gap-3 text-xs"
-              >
-                <img
-                  src={item.image}
-                  alt={item.name}
-                  className="w-12 h-12 rounded object-cover bg-slate-50 border border-slate-200 shrink-0"
-                />
-                <div className="flex-1 min-w-0">
-                  <span className="font-bold text-slate-900 block truncate">{item.name}</span>
-                  <span className="text-[10px] text-slate-500 font-mono">
-                    HSN: {item.hsnCode || '9403'} &bull; {item.sku}
-                  </span>
+
+          {builderItems.length === 0 ? (
+            <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50 space-y-2">
+              <Package className="w-8 h-8 text-slate-300 mx-auto" />
+              <p className="text-xs font-semibold text-slate-700">No products added to invoice yet</p>
+              <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                Use the product catalog selector above (Type &rarr; Category &rarr; Sub-category) to choose products. Their image, price, quantity, and specs will auto-fill here.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {builderItems.map((item, idx) => (
+                <div
+                  key={item.id || idx}
+                  className="p-3 rounded-xl border border-slate-200 bg-white shadow-2xs hover:border-slate-300 transition-all space-y-2"
+                >
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                    {/* Product Image Thumbnail */}
+                    <div className="relative shrink-0">
+                      <img
+                        src={item.image}
+                        alt={item.name}
+                        className="w-14 h-14 sm:w-16 sm:h-16 rounded-lg object-cover bg-slate-50 border border-slate-200"
+                        onError={(e) => {
+                          ; (e.target as HTMLImageElement).src =
+                            'https://images.unsplash.com/photo-1580480055273-228ff5388ef8?auto=format&fit=crop&w=150&q=70'
+                        }}
+                      />
+                      <span className="absolute -top-1.5 -left-1.5 bg-slate-900 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center font-mono">
+                        {idx + 1}
+                      </span>
+                    </div>
+
+                    {/* Item Name & Specs (Editable) */}
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <input
+                          type="text"
+                          value={item.name}
+                          onChange={(e) => handleUpdateItemProperty(idx, 'name', e.target.value)}
+                          className="font-bold text-slate-900 text-xs sm:text-[13px] bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 outline-none w-full sm:w-auto"
+                          placeholder="Product Name"
+                        />
+                        {item.sku && (
+                          <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                            {item.sku}
+                          </span>
+                        )}
+                        <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">
+                          HSN: {item.hsnCode || '9403'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-500">
+                        <input
+                          type="text"
+                          value={item.material || ''}
+                          onChange={(e) => handleUpdateItemProperty(idx, 'material', e.target.value)}
+                          placeholder="Material specs"
+                          className="bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[11px] text-slate-700 outline-none focus:border-blue-500"
+                        />
+                        <input
+                          type="text"
+                          value={item.dimensions || ''}
+                          onChange={(e) => handleUpdateItemProperty(idx, 'dimensions', e.target.value)}
+                          placeholder="Dimensions (e.g. W 120 × D 60 cm)"
+                          className="bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-[11px] text-slate-700 outline-none focus:border-blue-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Qty, Unit Rate (₹) & Line Total */}
+                    <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-center flex-wrap">
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
+                          Qty
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={item.quantity}
+                          onChange={(e) => handleUpdateItemProperty(idx, 'quantity', e.target.value)}
+                          className="w-16 bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-mono font-bold text-center text-slate-800 outline-none focus:border-blue-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
+                          Unit Rate (₹)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={item.unitPrice}
+                          onChange={(e) => handleUpdateItemProperty(idx, 'unitPrice', e.target.value)}
+                          className="w-24 bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-mono font-bold text-right text-slate-800 outline-none focus:border-blue-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-semibold text-emerald-600 block mb-0.5 text-center">
+                          Disc (%)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={item.discountPercent || ''}
+                          placeholder="0"
+                          onChange={(e) => handleUpdateItemProperty(idx, 'discountPercent', e.target.value)}
+                          className="w-14 bg-white border border-emerald-300 rounded-lg px-1.5 py-1 text-xs font-mono font-bold text-center text-emerald-700 outline-none focus:border-emerald-500 placeholder:text-slate-300"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5 text-right">
+                          Line Total (₹)
+                        </label>
+                        <div className="text-right pt-0.5 min-w-[80px]">
+                          <span className="font-mono font-bold text-xs sm:text-sm text-slate-900 block">
+                            ₹{item.total.toLocaleString('en-IN')}
+                          </span>
+                          {(item.discountAmount || 0) > 0 && (
+                            <span className="text-[9.5px] font-medium text-slate-400 block">
+                              <span className="line-through">₹{(item.quantity * item.unitPrice).toLocaleString('en-IN')}</span>{' '}
+                              <span className="text-emerald-600 font-bold">(-₹{item.discountAmount?.toLocaleString('en-IN')})</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveBuilderItem(idx)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 transition cursor-pointer hover:bg-rose-50"
+                        title="Remove item"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min="1"
-                    value={item.quantity}
-                    onChange={(e) => handleUpdateItem(idx, 'quantity', e.target.value)}
-                    className="w-16 bg-white border border-slate-200 rounded px-1.5 py-1 text-center font-mono font-bold"
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    value={item.unitPrice}
-                    onChange={(e) => handleUpdateItem(idx, 'unitPrice', e.target.value)}
-                    className="w-24 bg-white border border-slate-200 rounded px-2 py-1 text-right font-mono font-bold"
-                  />
-                  <span className="font-mono font-bold text-slate-900 text-xs min-w-[70px] text-right">
-                    ₹{item.total.toLocaleString('en-IN')}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setBuilderItems((prev) => prev.filter((_, i) => i !== idx))}
-                    className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer"
-                    title="Remove item"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Totals */}
         <div className="p-3 bg-slate-900 text-white rounded-xl flex items-center justify-between font-mono text-xs">
@@ -731,32 +1410,36 @@ export const InvoicesView: React.FC = () => {
           </div>
         </div>
 
-        <div className="pt-2 border-t border-slate-200 flex justify-end gap-2.5">
+        {/* Sticky Drawer Footer Actions */}
+        <div className="sticky bottom-0 bg-white/95 backdrop-blur-xs pt-3 pb-1 border-t border-slate-200/90 flex justify-end gap-2.5 z-20">
           <button
             type="button"
             onClick={() => {
               setIsCreateModalOpen(false)
               setEditingInvoiceId(null)
             }}
-            className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+            className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition cursor-pointer"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={!invoiceForm.customerName.trim() || builderItems.length === 0}
-            className={`px-4 py-1.5 rounded-lg text-white text-xs font-semibold shadow-xs transition inline-flex items-center gap-1.5 ${
-              !invoiceForm.customerName.trim() || builderItems.length === 0
-                ? 'bg-slate-300 cursor-not-allowed text-slate-500'
+            className={`px-5 py-2 rounded-xl text-white text-xs font-bold shadow-xs transition inline-flex items-center gap-2 ${!invoiceForm.customerName.trim() || builderItems.length === 0
+                ? 'bg-slate-200 cursor-not-allowed text-slate-400'
                 : 'bg-blue-600 hover:bg-blue-700 cursor-pointer active:scale-95'
-            }`}
+              }`}
           >
-            {editingInvoiceId ? <FileEdit className="w-3.5 h-3.5" /> : null}
-            <span>{editingInvoiceId ? 'Save & Update Invoice' : 'Generate Tax Invoice'}</span>
+            {editingInvoiceId ? <FileEdit className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+            <span>
+              {editingInvoiceId
+                ? 'Save & Update Invoice'
+                : `Generate Tax Invoice ${builderItems.length > 0 ? `(${builderItems.length} items)` : ''}`}
+            </span>
           </button>
         </div>
       </form>
-    </Modal>
+    </Drawer>
   )
 
   const renderPaymentModal = () =>
@@ -852,9 +1535,9 @@ export const InvoicesView: React.FC = () => {
       settings.addressLines && settings.addressLines.length > 0
         ? settings.addressLines
         : [
-            'Plot No. 42-B, SIDCO Industrial Estate',
-            'Ambattur, Chennai – 600058, Tamil Nadu, India',
-          ]
+          'Plot No. 42-B, SIDCO Industrial Estate',
+          'Ambattur, Chennai – 600058, Tamil Nadu, India',
+        ]
     const companyGstin = settings.gstin || '33AAAAA0000A1Z5'
     const companyEmail = settings.email || 'sales@brothersfurniture.in'
     const companyPhone =
@@ -991,6 +1674,7 @@ export const InvoicesView: React.FC = () => {
                   <th className="py-2 px-2.5 text-center w-16">HSN/SAC</th>
                   <th className="py-2 px-2.5 text-center w-12">Qty</th>
                   <th className="py-2 px-2.5 text-right w-24">Unit Rate</th>
+                  <th className="py-2 px-2.5 text-center w-16">Disc (%)</th>
                   <th className="py-2 px-2.5 text-right w-24">Taxable</th>
                   <th className="py-2 px-2.5 text-right w-28">Total (₹)</th>
                 </tr>
@@ -998,7 +1682,7 @@ export const InvoicesView: React.FC = () => {
               <tbody className="divide-y divide-slate-200">
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-6 text-center text-slate-400 text-xs">
+                    <td colSpan={8} className="py-6 text-center text-slate-400 text-xs">
                       No line items specified.
                     </td>
                   </tr>
@@ -1006,7 +1690,18 @@ export const InvoicesView: React.FC = () => {
                   items.map((item, idx) => {
                     const qty = Number(item.quantity) || 1
                     const rate = Number(item.unitPrice) || 0
-                    const itemSubtotal = Number(item.total) || qty * rate
+                    const gross = qty * rate
+                    const itemSubtotal = Number(item.total) || gross
+                    const discAmt = (item.discountAmount !== undefined && Number(item.discountAmount) > 0)
+                      ? Number(item.discountAmount)
+                      : Math.max(0, gross - itemSubtotal)
+                    const discPct = item.discountPercent
+                      ? Number(item.discountPercent)
+                      : (gross > 0 && discAmt > 0
+                        ? Math.round((discAmt / gross) * 100)
+                        : (inv.discountAmount && subtotal > 0
+                          ? Math.round((inv.discountAmount / subtotal) * 100)
+                          : 0))
                     const withGst = itemSubtotal * 1.18
                     return (
                       <tr key={idx} className="even:bg-[#f8fafc] text-[10.5px]">
@@ -1031,8 +1726,16 @@ export const InvoicesView: React.FC = () => {
                         <td className="py-2 px-2.5 text-right font-mono text-slate-700">
                           {formatCurrency(rate)}
                         </td>
+                        <td className="py-2 px-2.5 text-center font-mono font-semibold text-emerald-600">
+                          {discPct ? `${discPct}%` : '—'}
+                        </td>
                         <td className="py-2 px-2.5 text-right font-mono text-slate-700">
                           {formatCurrency(itemSubtotal)}
+                          {discAmt > 0 && (
+                            <span className="block text-[9px] text-emerald-600">
+                              -₹{discAmt.toLocaleString('en-IN')}
+                            </span>
+                          )}
                         </td>
                         <td className="py-2 px-2.5 text-right font-mono font-bold text-slate-900">
                           {formatCurrency(withGst)}
@@ -1111,9 +1814,9 @@ export const InvoicesView: React.FC = () => {
         </div>
 
         {/* 4. BANK DETAILS & AUTHORIZED SIGNATORY */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-3.5 pt-2">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-3.5 pt-2 items-stretch">
           {/* Bank Details Box (7 cols) */}
-          <div className="md:col-span-7 bg-[#f8fafc] border-[1.5px] border-slate-300 rounded-lg p-3 sm:p-3.5 space-y-2">
+          <div className="md:col-span-7 bg-[#f8fafc] border-[1.5px] border-slate-300 rounded-lg p-3 sm:p-3.5 space-y-2 flex flex-col justify-between">
             <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
               <span className="text-[10.5px] font-extrabold text-slate-900 uppercase tracking-[0.8px] flex items-center gap-1.5">
                 <Landmark className="w-3.5 h-3.5 text-blue-600" />
@@ -1178,11 +1881,11 @@ export const InvoicesView: React.FC = () => {
           </div>
 
           {/* Authorized Signatory (5 cols) */}
-          <div className="md:col-span-5 border border-dashed border-slate-300 rounded-lg p-3 sm:p-3.5 bg-white flex flex-col justify-between text-right min-h-[110px]">
+          <div className="md:col-span-5 border border-dashed border-slate-300 rounded-lg p-3 sm:p-3.5 bg-white flex flex-col justify-between text-right h-full">
             <div className="text-[10px] font-bold text-slate-700 uppercase tracking-wider">
               For {companyName}
             </div>
-            <div className="h-12 flex items-center justify-end my-1">
+            <div className="flex-1 flex items-center justify-end my-1 min-h-12">
               {settings.signatureUrl ? (
                 <img
                   src={settings.signatureUrl}
@@ -1273,6 +1976,22 @@ export const InvoicesView: React.FC = () => {
                   <span>Download<span className="hidden sm:inline"> PDF</span></span>
                 </>
               )}
+            </button>
+
+            {/* REGENERATE INVOICE PDF BUTTON */}
+            <button
+              onClick={async () => {
+                const newUrl = await generateInvoicePdf(selectedInvoice.id, selectedInvoice)
+                if (newUrl) {
+                  setSelectedInvoice((prev) => (prev ? { ...prev, pdfUrl: newUrl } : null))
+                }
+              }}
+              disabled={downloadingInvoiceId === selectedInvoice.id}
+              className="flex-1 sm:flex-initial justify-center px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+              title="Regenerate PDF with updated line items & pricing"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-600" />
+              <span>Regenerate<span className="hidden sm:inline"> PDF</span></span>
             </button>
 
             {/* PRINT TAX INVOICE BUTTON */}
@@ -1426,11 +2145,10 @@ export const InvoicesView: React.FC = () => {
                 <button
                   key={tab.id}
                   onClick={() => setStatusFilter(tab.id as any)}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium shrink-0 transition-colors cursor-pointer ${
-                    isSelected
+                  className={`px-3 py-1 rounded-lg text-xs font-medium shrink-0 transition-colors cursor-pointer ${isSelected
                       ? 'bg-slate-900 text-white font-semibold shadow-2xs'
                       : 'bg-slate-100/80 text-slate-600 hover:bg-slate-200/80'
-                  }`}
+                    }`}
                 >
                   {tab.label}
                 </button>
@@ -1454,18 +2172,16 @@ export const InvoicesView: React.FC = () => {
             <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
               <button
                 onClick={() => setViewMode('table')}
-                className={`p-1 rounded-md transition-all cursor-pointer ${
-                  viewMode === 'table' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-400 hover:text-slate-700'
-                }`}
+                className={`p-1 rounded-md transition-all cursor-pointer ${viewMode === 'table' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-400 hover:text-slate-700'
+                  }`}
                 title="Table View"
               >
                 <List className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={() => setViewMode('card')}
-                className={`p-1 rounded-md transition-all cursor-pointer ${
-                  viewMode === 'card' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-400 hover:text-slate-700'
-                }`}
+                className={`p-1 rounded-md transition-all cursor-pointer ${viewMode === 'card' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-400 hover:text-slate-700'
+                  }`}
                 title="Card View"
               >
                 <Grid className="w-3.5 h-3.5" />
@@ -1589,7 +2305,7 @@ export const InvoicesView: React.FC = () => {
                                 alt={it.name}
                                 className="inline-block h-8 w-8 rounded-lg ring-2 ring-white object-cover bg-slate-100"
                                 onError={(e) => {
-                                  ;(e.target as HTMLImageElement).src =
+                                  ; (e.target as HTMLImageElement).src =
                                     'https://images.unsplash.com/photo-1580480055273-228ff5388ef8?auto=format&fit=crop&w=150&q=70'
                                 }}
                               />
@@ -1622,9 +2338,8 @@ export const InvoicesView: React.FC = () => {
                           Paid: ₹{(inv.amountPaid || 0).toLocaleString('en-IN')}
                         </span>
                         <span
-                          className={`text-xs font-bold block ${
-                            inv.balanceDue > 0 ? 'text-amber-700' : 'text-slate-400'
-                          }`}
+                          className={`text-xs font-bold block ${inv.balanceDue > 0 ? 'text-amber-700' : 'text-slate-400'
+                            }`}
                         >
                           Due: ₹{(inv.balanceDue || 0).toLocaleString('en-IN')}
                         </span>
@@ -1669,11 +2384,10 @@ export const InvoicesView: React.FC = () => {
                                 setOpenActionMenuId(inv.id)
                               }
                             }}
-                            className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
-                              openActionMenuId === inv.id
+                            className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${openActionMenuId === inv.id
                                 ? 'bg-slate-100 text-slate-900 border-slate-300'
                                 : 'text-slate-400 hover:text-slate-700 hover:bg-slate-50 border-transparent hover:border-slate-200'
-                            }`}
+                              }`}
                             title="Actions"
                           >
                             <MoreVertical className="w-4 h-4" />
@@ -1686,249 +2400,118 @@ export const InvoicesView: React.FC = () => {
               </tbody>
             </table>
           </div>
-
-          {/* 3-Dot Action Menu Portal outside table */}
-          {activeActionInv && actionMenuCoords &&
-            createPortal(
-              <div
-                style={{
-                  position: 'fixed',
-                  top: `${actionMenuCoords.top}px`,
-                  left: `${actionMenuCoords.left}px`,
-                  width: '196px',
-                  zIndex: 99999,
-                }}
-                onClick={(e) => e.stopPropagation()}
-                className="bg-white/98 backdrop-blur-md rounded-2xl border border-slate-200 shadow-2xl py-1.5 animate-in fade-in zoom-in-95 duration-100 divide-y divide-slate-100 select-none text-xs"
-              >
-                <div className="py-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpenActionMenuId(null)
-                      setActionMenuCoords(null)
-                      setSelectedInvoice(activeActionInv)
-                    }}
-                    className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-orange-50 hover:text-orange-700 flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <Eye className="w-3.5 h-3.5 text-orange-500" />
-                    <span>View Tax Invoice</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpenActionMenuId(null)
-                      setActionMenuCoords(null)
-                      handleDownloadPdf(activeActionInv)
-                    }}
-                    className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Download PDF</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpenActionMenuId(null)
-                      setActionMenuCoords(null)
-                      handleOpenEditInvoice(activeActionInv)
-                    }}
-                    className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-slate-900 flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <FileEdit className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Edit Invoice</span>
-                  </button>
-
-                  {activeActionInv.balanceDue > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOpenActionMenuId(null)
-                        setActionMenuCoords(null)
-                        handleOpenRecordPayment(activeActionInv)
-                      }}
-                      className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center gap-2.5 transition-colors cursor-pointer"
-                    >
-                      <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Record Payment</span>
-                    </button>
-                  )}
-
-                  <a
-                    href={`https://wa.me/${activeActionInv.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                      `Greetings ${activeActionInv.customerName},\n\nBrothers Furniture official tax invoice ref *${activeActionInv.invoiceNumber}* for *₹${activeActionInv.total.toLocaleString(
-                        'en-IN'
-                      )}* is ready.\n\nAmount Paid: ₹${(activeActionInv.amountPaid || 0).toLocaleString(
-                        'en-IN'
-                      )}\nBalance Due: ₹${(activeActionInv.balanceDue || 0).toLocaleString(
-                        'en-IN'
-                      )}\n\nThank you for choosing Brothers Furniture.`
-                    )}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => {
-                      setOpenActionMenuId(null)
-                      setActionMenuCoords(null)
-                    }}
-                    className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Share on WhatsApp</span>
-                  </a>
-                </div>
-
-                <div className="py-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpenActionMenuId(null)
-                      setActionMenuCoords(null)
-                      handleDeleteInvoice(activeActionInv)
-                    }}
-                    className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Delete Invoice</span>
-                  </button>
-                </div>
-              </div>,
-              document.body
-            )}
         </div>
       ) : (
-        /* CARDS VIEW */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+        /* CARDS VIEW (Compact Low-Profile) */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {filteredInvoices.map((inv) => {
-            const statusInfo = statusConfig[inv.status] || {
-              label: inv.status,
-              pillClass: 'bg-slate-100 text-slate-700 border-slate-200',
-            }
+            const totalUnits = (inv.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 1), 0)
+            const itemsCount = inv.items?.length || 0
 
             return (
               <div
                 key={inv.id}
-                className="bg-white rounded-xl border border-slate-200/90 p-4 shadow-xs hover:border-orange-300 hover:shadow-sm transition-all space-y-3 flex flex-col justify-between group"
+                onClick={() => setSelectedInvoice(inv)}
+                className="bg-white rounded-xl border border-slate-200/90 p-3 shadow-2xs hover:border-orange-300 hover:shadow-sm transition-all duration-200 flex flex-col justify-between group cursor-pointer"
               >
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-mono font-bold text-slate-900 text-xs">
-                        {inv.invoiceNumber}
-                      </span>
-                      <button
-                        onClick={() => copyRefToClipboard(inv.invoiceNumber)}
-                        className="text-slate-400 hover:text-slate-600 transition p-0.5 rounded cursor-pointer"
-                        title="Copy"
-                      >
-                        {copiedInvId === inv.invoiceNumber ? (
-                          <Check className="w-3 h-3 text-emerald-600" />
-                        ) : (
-                          <Copy className="w-3 h-3" />
-                        )}
-                      </button>
-                    </div>
-
-                    <span
-                      className={`text-[11px] font-semibold rounded-lg px-2 py-0.5 border ${statusInfo.pillClass}`}
+                {/* Row 1: Invoice # + Proposal Ref + 3-Dot Actions */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-mono font-bold text-slate-900 text-xs bg-slate-100/90 px-2 py-0.5 rounded-md border border-slate-200/70">
+                      {inv.invoiceNumber}
+                    </span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        copyRefToClipboard(inv.invoiceNumber)
+                      }}
+                      className="text-slate-400 hover:text-slate-600 transition p-0.5 rounded hover:bg-slate-100 cursor-pointer"
+                      title="Copy Reference"
                     >
-                      {statusInfo.label}
-                    </span>
+                      {copiedInvId === inv.invoiceNumber ? (
+                        <Check className="w-3 h-3 text-emerald-600" />
+                      ) : (
+                        <Copy className="w-3 h-3" />
+                      )}
+                    </button>
+                    {inv.proposalRef && (
+                      <span className="text-[10px] bg-purple-50 text-purple-700 font-semibold px-1.5 py-0.5 rounded border border-purple-200/60 font-mono">
+                        Ref: {inv.proposalRef}
+                      </span>
+                    )}
                   </div>
 
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900 truncate">
-                      {inv.customerName} {inv.companyName ? `• ${inv.companyName}` : ''}
-                    </h3>
-                    <p className="text-xs text-slate-500 font-mono mt-0.5">
-                      Date: {inv.issueDate} &bull; Due: {inv.dueDate}
-                    </p>
-                  </div>
+                  {/* 3-Dot Actions Button (No status pill) */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (openActionMenuId === inv.id) {
+                        setOpenActionMenuId(null)
+                        setActionMenuCoords(null)
+                      } else {
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        const menuWidth = 196
+                        const menuHeight = 220
+                        const spaceBelow = window.innerHeight - rect.bottom
+                        const openUpward = spaceBelow < menuHeight && rect.top > menuHeight
 
-                  <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200/80 space-y-1.5">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                      Invoiced Products ({inv.items.length})
-                    </span>
-                    <div className="space-y-1 max-h-28 overflow-y-auto pr-1">
-                      {inv.items.map((it, idx) => (
-                        <div key={idx} className="flex items-center gap-2 text-xs">
-                          <img
-                            src={it.image}
-                            alt={it.name}
-                            className="w-7 h-7 rounded object-cover bg-white border border-slate-200 shrink-0"
-                            onError={(e) => {
-                              ;(e.target as HTMLImageElement).src =
-                                'https://images.unsplash.com/photo-1580480055273-228ff5388ef8?auto=format&fit=crop&w=150&q=70'
-                            }}
-                          />
-                          <span className="truncate flex-1 font-medium text-slate-800">
-                            {it.name}
-                          </span>
-                          <span className="font-mono text-slate-500 shrink-0">
-                            ×{it.quantity}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                        const top = openUpward
+                          ? Math.max(10, rect.top - menuHeight - 4)
+                          : Math.min(window.innerHeight - menuHeight - 10, rect.bottom + 4)
+                        let left = rect.right - menuWidth
+                        if (left < 10) left = 10
+                        if (left + menuWidth > window.innerWidth - 10) {
+                          left = window.innerWidth - menuWidth - 10
+                        }
 
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between font-mono text-xs">
-                    <div>
-                      <span className="text-[10px] text-slate-400 uppercase tracking-wider font-sans block">
-                        Total Amount
-                      </span>
-                      <span className="font-bold text-slate-900 block text-sm">
-                        ₹{inv.total.toLocaleString('en-IN')}
-                      </span>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-[10px] text-slate-400 uppercase tracking-wider font-sans block">
-                        Balance Due
-                      </span>
-                      <span
-                        className={`font-bold block text-sm ${
-                          inv.balanceDue > 0 ? 'text-amber-600' : 'text-emerald-600'
-                        }`}
-                      >
-                        ₹{(inv.balanceDue || 0).toLocaleString('en-IN')}
-                      </span>
-                    </div>
-                  </div>
+                        setActionMenuCoords({ top, left })
+                        setOpenActionMenuId(inv.id)
+                      }
+                    }}
+                    className={`p-1 rounded-md border transition-colors cursor-pointer ${openActionMenuId === inv.id
+                        ? 'bg-slate-100 text-slate-900 border-slate-300'
+                        : 'text-slate-400 hover:text-slate-700 hover:bg-slate-50 border-transparent hover:border-slate-200'
+                      }`}
+                    title="Actions"
+                  >
+                    <MoreVertical className="w-4 h-4" />
+                  </button>
                 </div>
 
-                <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setSelectedInvoice(inv)}
-                      className="text-xs text-orange-600 hover:text-orange-700 font-semibold inline-flex items-center gap-1 cursor-pointer transition"
-                    >
-                      <Eye className="w-3.5 h-3.5" /> View
-                    </button>
-                    <button
-                      onClick={() => handleOpenEditInvoice(inv)}
-                      className="text-xs text-blue-600 hover:text-blue-700 font-semibold inline-flex items-center gap-1 cursor-pointer transition"
-                    >
-                      <FileEdit className="w-3.5 h-3.5" /> Edit
-                    </button>
+                {/* Row 2: Client & Company */}
+                <div className="my-1.5 flex items-baseline justify-between gap-2 min-w-0">
+                  <div className="truncate min-w-0">
+                    <span className="text-xs font-bold text-slate-900 truncate">
+                      {inv.customerName}
+                    </span>
+                    {inv.companyName && (
+                      <span className="text-[11px] text-slate-500 ml-1.5 truncate">
+                        ({inv.companyName})
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                    {inv.issueDate ? new Date(inv.issueDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : ''}
+                  </span>
+                </div>
+
+                {/* Row 3: Product Count & Net Amount (No status) */}
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 text-slate-600">
+                    <Package className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+                    <span className="font-semibold text-slate-800">
+                      {itemsCount} {itemsCount === 1 ? 'Product' : 'Products'}
+                    </span>
+                    <span className="text-[11px] text-slate-400 font-mono">
+                      ({totalUnits} {totalUnits === 1 ? 'unit' : 'units'})
+                    </span>
                   </div>
 
-                  <div className="flex items-center gap-1">
-                    {inv.balanceDue > 0 && (
-                      <button
-                        onClick={() => handleOpenRecordPayment(inv)}
-                        className="px-2 py-1 rounded bg-emerald-50 text-emerald-700 text-xs font-semibold hover:bg-emerald-100 transition cursor-pointer"
-                      >
-                        Record Payment
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleDeleteInvoice(inv)}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors cursor-pointer"
-                      title="Delete"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                  <div className="text-right">
+                    <span className="font-mono font-bold text-slate-900 text-sm">
+                      ₹{inv.total.toLocaleString('en-IN')}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1936,6 +2519,129 @@ export const InvoicesView: React.FC = () => {
           })}
         </div>
       )}
+
+      {/* 3-Dot Action Menu Portal (Available for both Table & Card views) */}
+      {activeActionInv && actionMenuCoords &&
+        createPortal(
+          <div
+            style={{
+              position: 'fixed',
+              top: `${actionMenuCoords.top}px`,
+              left: `${actionMenuCoords.left}px`,
+              width: '196px',
+              zIndex: 99999,
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white/98 backdrop-blur-md rounded-2xl border border-slate-200 shadow-2xl py-1.5 animate-in fade-in zoom-in-95 duration-100 divide-y divide-slate-100 select-none text-xs"
+          >
+            <div className="py-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenActionMenuId(null)
+                  setActionMenuCoords(null)
+                  setSelectedInvoice(activeActionInv)
+                }}
+                className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-orange-50 hover:text-orange-700 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <Eye className="w-3.5 h-3.5 text-orange-500" />
+                <span>View Tax Invoice</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenActionMenuId(null)
+                  setActionMenuCoords(null)
+                  handleDownloadPdf(activeActionInv)
+                }}
+                className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5 text-blue-600" />
+                <span>Download PDF</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  setOpenActionMenuId(null)
+                  setActionMenuCoords(null)
+                  await generateInvoicePdf(activeActionInv.id, activeActionInv)
+                }}
+                className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-slate-900 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                <span>Regenerate PDF</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenActionMenuId(null)
+                  setActionMenuCoords(null)
+                  handleOpenEditInvoice(activeActionInv)
+                }}
+                className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-slate-900 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <FileEdit className="w-3.5 h-3.5 text-blue-600" />
+                <span>Edit Invoice</span>
+              </button>
+
+              {activeActionInv.balanceDue > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenActionMenuId(null)
+                    setActionMenuCoords(null)
+                    handleOpenRecordPayment(activeActionInv)
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center gap-2.5 transition-colors cursor-pointer"
+                >
+                  <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Record Payment</span>
+                </button>
+              )}
+
+              <a
+                href={`https://wa.me/${activeActionInv.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
+                  `Greetings ${activeActionInv.customerName},\n\nBrothers Furniture official tax invoice ref *${activeActionInv.invoiceNumber}* for *₹${activeActionInv.total.toLocaleString(
+                    'en-IN'
+                  )}* is ready.\n\nAmount Paid: ₹${(activeActionInv.amountPaid || 0).toLocaleString(
+                    'en-IN'
+                  )}\nBalance Due: ₹${(activeActionInv.balanceDue || 0).toLocaleString(
+                    'en-IN'
+                  )}\n\nThank you for choosing Brothers Furniture.`
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => {
+                  setOpenActionMenuId(null)
+                  setActionMenuCoords(null)
+                }}
+                className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Share on WhatsApp</span>
+              </a>
+            </div>
+
+            <div className="py-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenActionMenuId(null)
+                  setActionMenuCoords(null)
+                  handleDeleteInvoice(activeActionInv)
+                }}
+                className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Invoice</span>
+              </button>
+            </div>
+          </div>,
+          document.body
+        )}
       {/* 4. NEW TAX INVOICE GENERATOR / EDIT MODAL */}
       {renderInvoiceBuilderModal()}
 

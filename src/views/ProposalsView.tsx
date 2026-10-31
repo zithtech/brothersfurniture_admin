@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   AlertCircle,
   ArrowLeft,
+  Building2,
   Check,
   CheckCircle2,
   Copy,
@@ -31,10 +32,12 @@ import {
   User,
 } from 'lucide-react'
 import { Drawer } from '../components/common/Drawer'
-import { SearchableSelect } from '../components/common/SearchableSelect'
+import { SearchableSelect, type SelectOption } from '../components/common/SearchableSelect'
 import { StatusDropdown } from '../components/common/StatusDropdown'
 import { useAdmin } from '../context/AdminContext'
+import { customerApi } from '../services/customerApi'
 import type { Product, Proposal, ProposalItem, ProposalStatus } from '../types/admin'
+import type { Customer } from '../types/customer'
 
 export const ProposalsView: React.FC = () => {
   const {
@@ -217,10 +220,106 @@ export const ProposalsView: React.FC = () => {
   }, [proposals, statusFilter, searchQuery])
 
   // --- Dynamic Proposal Builder Form State ---
+  const [customersList, setCustomersList] = useState<Customer[]>([])
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('')
+
+  // Load Customers from Customer Page API
+  useEffect(() => {
+    let isMounted = true
+    const loadCustomers = async () => {
+      try {
+        const res = await customerApi.getCustomers({ limit: 100, sortBy: 'company_name', sortOrder: 'asc' })
+        if (isMounted && res?.items) {
+          setCustomersList(res.items)
+        }
+      } catch (err) {
+        console.warn('Could not load customers for proposal dropdown:', err)
+      }
+    }
+    loadCustomers()
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  const customerOptions: SelectOption[] = useMemo(() => {
+    return customersList.map((c) => {
+      const contactInfo = [
+        c.customerCode,
+        c.primaryContact?.name ? `Contact: ${c.primaryContact.name}` : null,
+        c.companyPhone ? `✆ ${c.companyPhone}` : null,
+        c.primaryAddress?.city ? `📍 ${c.primaryAddress.city}` : null,
+      ]
+        .filter(Boolean)
+        .join(' • ')
+
+      return {
+        value: c.id,
+        label: c.companyName || c.primaryContact?.name || c.customerCode,
+        description: contactInfo,
+        initials: (c.companyName || c.primaryContact?.name || 'CU').slice(0, 2).toUpperCase(),
+        badgeColor: 'bg-orange-600 text-white',
+      }
+    })
+  }, [customersList])
+
+  const handleCustomerSelect = async (customerId: string) => {
+    setSelectedCustomerId(customerId)
+    if (!customerId) return
+    const customer = customersList.find((c) => c.id === customerId)
+    if (!customer) return
+
+    let fullAddr = ''
+    if (customer.primaryAddress) {
+      const pa = customer.primaryAddress
+      fullAddr = [pa.addressLine1, pa.city, pa.state, pa.pinCode].filter(Boolean).join(', ')
+    }
+
+    try {
+      const full = await customerApi.getCustomerById(customerId)
+      if (full) {
+        const defAddr =
+          full.addresses?.find((a) => a.isDefault || a.addressType === 'billing') || full.addresses?.[0]
+        if (defAddr) {
+          fullAddr = [defAddr.addressLine1, defAddr.addressLine2, defAddr.city, defAddr.state, defAddr.pinCode]
+            .filter(Boolean)
+            .join(', ')
+        }
+        const primaryContact = full.contacts?.find((ct) => ct.isPrimary) || full.contacts?.[0]
+
+        setClientForm((prev) => ({
+          ...prev,
+          preparedFor: primaryContact?.name || full.companyName || prev.preparedFor,
+          companyName: full.companyName || '',
+          phone: primaryContact?.phone || full.companyPhone || prev.phone,
+          email: primaryContact?.email || full.companyEmail || prev.email,
+          clientGstin: full.gstNumber || prev.clientGstin,
+          address: fullAddr || prev.address,
+        }))
+        return
+      }
+    } catch {
+      // fallback to list item
+    }
+
+    setClientForm((prev) => ({
+      ...prev,
+      preparedFor: customer.primaryContact?.name || customer.companyName || prev.preparedFor,
+      companyName: customer.companyName || '',
+      phone: customer.primaryContact?.phone || customer.companyPhone || prev.phone,
+      email: customer.companyEmail || customer.primaryContact?.email || prev.email,
+      clientGstin: customer.gstNumber || prev.clientGstin,
+      address: fullAddr || prev.address,
+    }))
+  }
+
   const [clientForm, setClientForm] = useState<{
     title: string
     preparedFor: string
+    companyName: string
     phone: string
+    email: string
+    clientGstin: string
     address: string
     targetDeliveryDate: string
     validUntil: string
@@ -231,7 +330,10 @@ export const ProposalsView: React.FC = () => {
   }>({
     title: '',
     preparedFor: '',
+    companyName: '',
     phone: '',
+    email: '',
+    clientGstin: '',
     address: '',
     targetDeliveryDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -497,10 +599,21 @@ export const ProposalsView: React.FC = () => {
 
   const handleOpenEditProposal = (prop: Proposal) => {
     setEditingProposalId(prop.id)
+    const matched = customersList.find(
+      (c) =>
+        (prop.companyName && c.companyName?.toLowerCase() === prop.companyName.toLowerCase()) ||
+        (prop.customerName &&
+          (c.companyName?.toLowerCase() === prop.customerName.toLowerCase() ||
+            c.primaryContact?.name?.toLowerCase() === prop.customerName.toLowerCase()))
+    )
+    setSelectedCustomerId(matched?.id || '')
     setClientForm({
       title: prop.title || '',
       preparedFor: prop.preparedFor || prop.customerName || '',
+      companyName: prop.companyName || '',
       phone: prop.clientPhone || prop.phone || '',
+      email: prop.email || '',
+      clientGstin: prop.clientGstin || '',
       address: prop.clientAddress || prop.deliveryAddress || '',
       targetDeliveryDate: prop.targetDeliveryDate || new Date().toISOString().split('T')[0],
       validUntil: prop.validUntil || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -515,10 +628,14 @@ export const ProposalsView: React.FC = () => {
 
   const handleOpenCreateProposal = () => {
     setEditingProposalId(null)
+    setSelectedCustomerId('')
     setClientForm({
       title: '',
       preparedFor: '',
+      companyName: '',
       phone: '',
+      email: '',
+      clientGstin: '',
       address: '',
       targetDeliveryDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -542,12 +659,16 @@ export const ProposalsView: React.FC = () => {
     const clientAddress = clientForm.address.trim() || 'Direct Site Delivery (Chennai)'
 
     if (editingProposalId) {
+      const existingProp = proposals.find((p) => p.id === editingProposalId)
       const updatePayload: Partial<Proposal> = {
         title: proposalTitle,
         preparedFor,
         customerName: preparedFor,
+        companyName: clientForm.companyName.trim() || undefined,
         phone: clientPhone,
         clientPhone,
+        email: clientForm.email.trim(),
+        clientGstin: clientForm.clientGstin.trim() || undefined,
         deliveryAddress: clientAddress,
         clientAddress,
         targetDeliveryDate: clientForm.targetDeliveryDate,
@@ -563,13 +684,48 @@ export const ProposalsView: React.FC = () => {
         total: builderGrandTotal,
         notes: clientForm.notes,
         projectScope: clientForm.projectScope,
+        pdfUrl: undefined, // Clear stale PDF cache
+        r2Key: undefined,
       }
+
+      const updatedFullProposal: Proposal = {
+        ...existingProp,
+        ...updatePayload,
+      } as Proposal
+
       updateProposal(editingProposalId, updatePayload)
       if (selectedProposal?.id === editingProposalId) {
-        setSelectedProposal((prev) => (prev ? { ...prev, ...updatePayload } : null))
+        setSelectedProposal(updatedFullProposal)
       }
       setIsCreateModalOpen(false)
       setEditingProposalId(null)
+      setSelectedCustomerId('')
+      setClientForm({
+        title: '',
+        preparedFor: '',
+        companyName: '',
+        phone: '',
+        email: '',
+        clientGstin: '',
+        address: '',
+        targetDeliveryDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        discountPercent: 0,
+        projectScope: '',
+        status: 'draft',
+        notes: '',
+      })
+      setBuilderItems([])
+
+      // Automatically regenerate Proposal PDF after update with new products & totals
+      generateProposalPdf(editingProposalId, updatedFullProposal)
+        .then((newPdfUrl) => {
+          if (newPdfUrl && selectedProposal?.id === editingProposalId) {
+            setSelectedProposal((prev) => (prev ? { ...prev, pdfUrl: newPdfUrl } : null))
+          }
+        })
+        .catch((err) => console.error('Failed to regenerate proposal PDF after update:', err))
+
       return
     }
 
@@ -577,11 +733,11 @@ export const ProposalsView: React.FC = () => {
       title: proposalTitle,
       preparedFor: preparedFor,
       customerName: preparedFor,
-      companyName: undefined,
+      companyName: clientForm.companyName.trim() || undefined,
       phone: clientPhone,
       clientPhone: clientPhone,
-      email: '',
-      clientGstin: undefined,
+      email: clientForm.email.trim(),
+      clientGstin: clientForm.clientGstin.trim() || undefined,
       deliveryAddress: clientAddress,
       clientAddress: clientAddress,
       targetDeliveryDate: clientForm.targetDeliveryDate,
@@ -605,11 +761,20 @@ export const ProposalsView: React.FC = () => {
       ],
     })
 
+    // Automatically generate PDF for new proposal in background
+    generateProposalPdf(newProposal.id, newProposal).catch((err) =>
+      console.error('Failed to generate PDF for new proposal:', err)
+    )
+
     setIsCreateModalOpen(false)
+    setSelectedCustomerId('')
     setClientForm({
       title: '',
       preparedFor: '',
+      companyName: '',
       phone: '',
+      email: '',
+      clientGstin: '',
       address: '',
       targetDeliveryDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -637,8 +802,8 @@ export const ProposalsView: React.FC = () => {
     }
   }
 
-  const handleConvertProposal = (proposal: Proposal) => {
-    const invoice = convertProposalToInvoice(proposal.id)
+  const handleConvertProposal = async (proposal: Proposal) => {
+    const invoice = await convertProposalToInvoice(proposal.id)
     if (invoice) {
       setSelectedProposal(null)
       setCurrentView('invoices')
@@ -706,6 +871,22 @@ export const ProposalsView: React.FC = () => {
                   <span>Download<span className="hidden sm:inline"> PDF</span></span>
                 </>
               )}
+            </button>
+
+            {/* REGENERATE PROPOSAL PDF BUTTON */}
+            <button
+              onClick={async () => {
+                const newUrl = await generateProposalPdf(selectedProposal.id, selectedProposal)
+                if (newUrl) {
+                  setSelectedProposal((prev) => (prev ? { ...prev, pdfUrl: newUrl } : null))
+                }
+              }}
+              disabled={isGeneratingPdf}
+              className="flex-1 sm:flex-initial justify-center px-3 sm:px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 disabled:opacity-60 text-slate-700 hover:text-slate-900 border border-slate-200 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
+              title="Regenerate proposal PDF with updated products and specs"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-600" />
+              <span>Regenerate<span className="hidden sm:inline"> PDF</span></span>
             </button>
 
             {/* Convert to Invoice Button */}
@@ -866,11 +1047,10 @@ export const ProposalsView: React.FC = () => {
                 <button
                   key={tab.id}
                   onClick={() => setStatusFilter(tab.id as any)}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium shrink-0 transition-colors cursor-pointer ${
-                    isSelected
+                  className={`px-3 py-1 rounded-lg text-xs font-medium shrink-0 transition-colors cursor-pointer ${isSelected
                       ? 'bg-slate-900 text-white font-semibold shadow-2xs'
                       : 'bg-slate-100/80 text-slate-600 hover:bg-slate-200/80'
-                  }`}
+                    }`}
                 >
                   {tab.label}
                 </button>
@@ -894,18 +1074,16 @@ export const ProposalsView: React.FC = () => {
             <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
               <button
                 onClick={() => setViewMode('table')}
-                className={`p-1 rounded-md transition-all cursor-pointer ${
-                  viewMode === 'table' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-400 hover:text-slate-700'
-                }`}
+                className={`p-1 rounded-md transition-all cursor-pointer ${viewMode === 'table' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-400 hover:text-slate-700'
+                  }`}
                 title="Table View"
               >
                 <List className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={() => setViewMode('card')}
-                className={`p-1 rounded-md transition-all cursor-pointer ${
-                  viewMode === 'card' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-400 hover:text-slate-700'
-                }`}
+                className={`p-1 rounded-md transition-all cursor-pointer ${viewMode === 'card' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-400 hover:text-slate-700'
+                  }`}
                 title="Card View"
               >
                 <Grid className="w-3.5 h-3.5" />
@@ -1045,7 +1223,7 @@ export const ProposalsView: React.FC = () => {
                                 alt={it.name}
                                 className="inline-block h-8 w-8 rounded-lg ring-2 ring-white object-cover bg-slate-100"
                                 onError={(e) => {
-                                  ;(e.target as HTMLImageElement).src =
+                                  ; (e.target as HTMLImageElement).src =
                                     'https://images.unsplash.com/photo-1580480055273-228ff5388ef8?auto=format&fit=crop&w=150&q=70'
                                 }}
                               />
@@ -1119,11 +1297,10 @@ export const ProposalsView: React.FC = () => {
                                 setOpenActionMenuId(prop.id)
                               }
                             }}
-                            className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
-                              openActionMenuId === prop.id
+                            className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${openActionMenuId === prop.id
                                 ? 'bg-slate-100 text-slate-900 border-slate-300'
                                 : 'text-slate-400 hover:text-slate-700 hover:bg-slate-50 border-transparent hover:border-slate-200'
-                            }`}
+                              }`}
                             title="Actions"
                           >
                             <MoreVertical className="w-4 h-4" />
@@ -1136,267 +1313,111 @@ export const ProposalsView: React.FC = () => {
               </tbody>
             </table>
           </div>
-
-          {/* 3-Dot Action Menu Portal outside table */}
-          {activeActionProp && actionMenuCoords &&
-            createPortal(
-              <div
-                style={{
-                  position: 'fixed',
-                  top: `${actionMenuCoords.top}px`,
-                  left: `${actionMenuCoords.left}px`,
-                  width: '196px',
-                  zIndex: 99999,
-                }}
-                onClick={(e) => e.stopPropagation()}
-                className="bg-white/98 backdrop-blur-md rounded-2xl border border-slate-200 shadow-2xl py-1.5 animate-in fade-in zoom-in-95 duration-100 divide-y divide-slate-100 select-none text-xs"
-              >
-                <div className="py-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpenActionMenuId(null)
-                      setActionMenuCoords(null)
-                      handleOpenEditProposal(activeActionProp)
-                    }}
-                    className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-slate-900 flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <FileEdit className="w-3.5 h-3.5 text-slate-500" />
-                    <span>Edit Proposal</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpenActionMenuId(null)
-                      setActionMenuCoords(null)
-                      setSelectedProposal(activeActionProp)
-                    }}
-                    className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-orange-50 hover:text-orange-700 flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <Eye className="w-3.5 h-3.5 text-orange-500" />
-                    <span>View Proposal</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpenActionMenuId(null)
-                      setActionMenuCoords(null)
-                      handleDownloadPdf(activeActionProp)
-                    }}
-                    disabled={isGeneratingPdf}
-                    className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Download PDF</span>
-                  </button>
-                </div>
-
-                <div className="py-1">
-                  {activeActionProp.status !== 'converted' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOpenActionMenuId(null)
-                        setActionMenuCoords(null)
-                        handleConvertProposal(activeActionProp)
-                      }}
-                      className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-purple-50 hover:text-purple-700 flex items-center gap-2.5 transition-colors cursor-pointer"
-                    >
-                      <Receipt className="w-3.5 h-3.5 text-purple-600" />
-                      <span>Convert to Invoice</span>
-                    </button>
-                  )}
-
-                  <a
-                    href={`https://wa.me/${(activeActionProp.clientPhone || activeActionProp.phone || '').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                      `Greetings ${activeActionProp.preparedFor || activeActionProp.customerName},\n\nBrothers Furniture (Ambattur Industrial Estate) has prepared your commercial fit-out proposal ref *${activeActionProp.proposalNumber}* for *₹${activeActionProp.total.toLocaleString(
-                        'en-IN'
-                      )}*.\n\nItems included:\n${activeActionProp.items
-                        .map((it) => `• ${it.name} (Qty: ${it.quantity})`)
-                        .join('\n')}\n\nOur executive will coordinate with you for layout validation.`
-                    )}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => {
-                      setOpenActionMenuId(null)
-                      setActionMenuCoords(null)
-                    }}
-                    className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Share via WhatsApp</span>
-                  </a>
-                </div>
-
-                <div className="py-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpenActionMenuId(null)
-                      setActionMenuCoords(null)
-                      handleDeleteProposal(activeActionProp)
-                    }}
-                    className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                    <span>Delete Proposal</span>
-                  </button>
-                </div>
-              </div>,
-              document.body
-            )}
         </div>
       ) : (
-        /* CARDS VIEW */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+        /* CARDS VIEW (Compact Low-Profile) */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {filteredProposals.map((prop) => {
+            const totalUnits = (prop.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 1), 0)
+            const itemsCount = prop.items?.length || 0
+
             return (
               <div
                 key={prop.id}
-                className="bg-white rounded-xl border border-slate-200/90 p-4 shadow-xs hover:border-orange-300 hover:shadow-sm transition-all space-y-3 flex flex-col justify-between group"
+                onClick={() => setSelectedProposal(prop)}
+                className="bg-white rounded-xl border border-slate-200/90 p-3 shadow-2xs hover:border-orange-300 hover:shadow-sm transition-all duration-200 flex flex-col justify-between group cursor-pointer"
               >
-                <div className="space-y-3">
-                  {/* Top Bar */}
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-mono font-bold text-slate-900 text-xs">
-                        {prop.proposalNumber}
-                      </span>
-                      <button
-                        onClick={() => copyRefToClipboard(prop.proposalNumber)}
-                        className="text-slate-400 hover:text-slate-600 transition p-0.5 rounded cursor-pointer"
-                        title="Copy Ref"
-                      >
-                        {copiedPropId === prop.proposalNumber ? (
-                          <Check className="w-3 h-3 text-emerald-600" />
-                        ) : (
-                          <Copy className="w-3 h-3" />
-                        )}
-                      </button>
-                    </div>
-
-                    <div onClick={(e) => e.stopPropagation()}>
-                      <StatusDropdown
-                        value={prop.status}
-                        size="sm"
-                        align="right"
-                        onChange={(newStatus) => updateProposalStatus(prop.id, newStatus)}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Title & Client */}
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900 line-clamp-1 group-hover:text-orange-600 transition">
-                      {prop.title}
-                    </h3>
-                    <div className="mt-1 space-y-0.5 text-xs text-slate-600">
-                      <p className="font-semibold text-slate-800 truncate flex items-center gap-1">
-                        <User className="w-3 h-3 text-orange-500 shrink-0" />
-                        <span>For: {prop.preparedFor || prop.customerName || 'Direct Client'}</span>
-                      </p>
-                      {(prop.clientPhone || prop.phone) ? (
-                        <p className="text-[11px] text-slate-500 truncate flex items-center gap-1 font-mono">
-                          <Phone className="w-3 h-3 text-slate-400 shrink-0" />
-                          <span>{prop.clientPhone || prop.phone}</span>
-                        </p>
-                      ) : null}
-                      {(prop.clientAddress || prop.deliveryAddress) ? (
-                        <p className="text-[11px] text-slate-500 truncate flex items-center gap-1" title={prop.clientAddress || prop.deliveryAddress}>
-                          <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
-                          <span>{prop.clientAddress || prop.deliveryAddress}</span>
-                        </p>
-                      ) : null}
-                    </div>
-                    <p className="text-[11px] text-slate-400 font-medium mt-1 truncate flex items-center gap-1">
-                      <FileText className="w-3 h-3 text-slate-400 shrink-0" />
-                      Scope: {prop.items.length} items &bull; Valid: {prop.validUntil}
-                    </p>
-                  </div>
-
-                  {/* Visual Products Strip with Product Images */}
-                  <div className="p-2 bg-slate-50 rounded-lg border border-slate-200/80 space-y-2">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                      Scope ({prop.items.length} Products)
+                {/* Row 1: Proposal # + 3-Dot Actions */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-mono font-bold text-slate-900 text-xs bg-slate-100/90 px-2 py-0.5 rounded-md border border-slate-200/70">
+                      {prop.proposalNumber}
                     </span>
-                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                      {prop.items.map((it, idx) => (
-                        <div key={idx} className="flex items-center gap-2 text-xs">
-                          <img
-                            src={it.image}
-                            alt={it.name}
-                            className="w-8 h-8 rounded-md object-cover bg-white border border-slate-200 shrink-0"
-                            onError={(e) => {
-                              ;(e.target as HTMLImageElement).src =
-                                'https://images.unsplash.com/photo-1580480055273-228ff5388ef8?auto=format&fit=crop&w=150&q=70'
-                            }}
-                          />
-                          <div className="min-w-0 flex-1">
-                            <span className="font-medium text-slate-800 truncate block">
-                              {it.name}
-                            </span>
-                            <span className="text-[10.5px] text-slate-400 block">
-                              Qty: <strong>{it.quantity}</strong> • ₹{it.unitPrice.toLocaleString('en-IN')}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        copyRefToClipboard(prop.proposalNumber)
+                      }}
+                      className="text-slate-400 hover:text-slate-600 transition p-0.5 rounded hover:bg-slate-100 cursor-pointer"
+                      title="Copy Reference"
+                    >
+                      {copiedPropId === prop.proposalNumber ? (
+                        <Check className="w-3 h-3 text-emerald-600" />
+                      ) : (
+                        <Copy className="w-3 h-3" />
+                      )}
+                    </button>
                   </div>
 
-                  {/* Commercial Value */}
-                  <div className="pt-1 flex items-center justify-between border-t border-slate-100">
-                    <div>
-                      <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold block">
-                        Net Commercial Quote
-                      </span>
-                      <span className="font-mono font-bold text-base text-slate-900 block text-orange-600">
-                        ₹{prop.total.toLocaleString('en-IN')}
-                      </span>
-                    </div>
-                    <span className="text-[11px] text-blue-600 font-mono font-medium">
-                      Valid: {prop.validUntil}
-                    </span>
-                  </div>
+                  {/* 3-Dot Actions Button (No status dropdown) */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (openActionMenuId === prop.id) {
+                        setOpenActionMenuId(null)
+                        setActionMenuCoords(null)
+                      } else {
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        const menuWidth = 196
+                        const menuHeight = 220
+                        const spaceBelow = window.innerHeight - rect.bottom
+                        const openUpward = spaceBelow < menuHeight && rect.top > menuHeight
+
+                        const top = openUpward
+                          ? Math.max(10, rect.top - menuHeight - 4)
+                          : Math.min(window.innerHeight - menuHeight - 10, rect.bottom + 4)
+                        let left = rect.right - menuWidth
+                        if (left < 10) left = 10
+                        if (left + menuWidth > window.innerWidth - 10) {
+                          left = window.innerWidth - menuWidth - 10
+                        }
+
+                        setActionMenuCoords({ top, left })
+                        setOpenActionMenuId(prop.id)
+                      }
+                    }}
+                    className={`p-1 rounded-md border transition-colors cursor-pointer ${openActionMenuId === prop.id
+                        ? 'bg-slate-100 text-slate-900 border-slate-300'
+                        : 'text-slate-400 hover:text-slate-700 hover:bg-slate-50 border-transparent hover:border-slate-200'
+                      }`}
+                    title="Actions"
+                  >
+                    <MoreVertical className="w-4 h-4" />
+                  </button>
                 </div>
 
-                {/* Footer Buttons */}
-                <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between gap-1 text-xs">
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setSelectedProposal(prop)}
-                      className="text-xs text-orange-600 hover:text-orange-700 font-semibold inline-flex items-center gap-1 cursor-pointer transition"
-                    >
-                      <Eye className="w-3.5 h-3.5" /> View
-                    </button>
-                    <button
-                      onClick={() => handleOpenEditProposal(prop)}
-                      className="text-xs text-slate-600 hover:text-slate-900 font-semibold inline-flex items-center gap-1 cursor-pointer transition"
-                      title="Edit Proposal"
-                    >
-                      <FileEdit className="w-3.5 h-3.5 text-slate-500" /> Edit
-                    </button>
+                {/* Row 2: Title & Client */}
+                <div className="my-1.5 flex items-baseline justify-between gap-2 min-w-0">
+                  <div className="truncate min-w-0">
+                    <span className="text-xs font-bold text-slate-900 truncate">
+                      {prop.title || 'Fit-out Proposal'}
+                    </span>
+                    <span className="text-[11px] text-slate-500 ml-1.5 truncate">
+                      ({prop.preparedFor || prop.customerName || 'Direct Client'})
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                    {prop.validUntil ? `Valid: ${prop.validUntil}` : ''}
+                  </span>
+                </div>
+
+                {/* Row 3: Product count & Net Commercial Quote (No status) */}
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 text-slate-600">
+                    <Package className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                    <span className="font-semibold text-slate-800">
+                      {itemsCount} {itemsCount === 1 ? 'Product' : 'Products'}
+                    </span>
+                    <span className="text-[11px] text-slate-400 font-mono">
+                      ({totalUnits} {totalUnits === 1 ? 'unit' : 'units'})
+                    </span>
                   </div>
 
-                  <div className="flex items-center gap-1">
-                    {prop.status !== 'converted' && (
-                      <button
-                        onClick={() => handleConvertProposal(prop)}
-                        className="p-1.5 text-purple-600 hover:bg-purple-50 rounded-md transition-colors cursor-pointer text-[11px] font-semibold inline-flex items-center gap-1"
-                        title="Convert to Tax Invoice"
-                      >
-                        <Receipt className="w-3 h-3" /> Convert
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleDeleteProposal(prop)}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors cursor-pointer"
-                      title="Delete"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                  <div className="text-right">
+                    <span className="font-mono font-bold text-orange-600 text-sm">
+                      ₹{prop.total.toLocaleString('en-IN')}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1404,6 +1425,129 @@ export const ProposalsView: React.FC = () => {
           })}
         </div>
       )}
+
+      {/* 3-Dot Action Menu Portal (Available for both Table & Card views) */}
+      {activeActionProp && actionMenuCoords &&
+        createPortal(
+          <div
+            style={{
+              position: 'fixed',
+              top: `${actionMenuCoords.top}px`,
+              left: `${actionMenuCoords.left}px`,
+              width: '196px',
+              zIndex: 99999,
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white/98 backdrop-blur-md rounded-2xl border border-slate-200 shadow-2xl py-1.5 animate-in fade-in zoom-in-95 duration-100 divide-y divide-slate-100 select-none text-xs"
+          >
+            <div className="py-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenActionMenuId(null)
+                  setActionMenuCoords(null)
+                  setSelectedProposal(activeActionProp)
+                }}
+                className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-orange-50 hover:text-orange-700 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <Eye className="w-3.5 h-3.5 text-orange-500" />
+                <span>View Proposal</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenActionMenuId(null)
+                  setActionMenuCoords(null)
+                  handleDownloadPdf(activeActionProp)
+                }}
+                className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5 text-blue-600" />
+                <span>Download PDF</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  setOpenActionMenuId(null)
+                  setActionMenuCoords(null)
+                  await generateProposalPdf(activeActionProp.id, activeActionProp)
+                }}
+                className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-slate-900 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                <span>Regenerate PDF</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenActionMenuId(null)
+                  setActionMenuCoords(null)
+                  handleOpenEditProposal(activeActionProp)
+                }}
+                className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-slate-900 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <FileEdit className="w-3.5 h-3.5 text-blue-600" />
+                <span>Edit Proposal</span>
+              </button>
+            </div>
+
+            <div className="py-1">
+              {activeActionProp.status !== 'converted' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenActionMenuId(null)
+                    setActionMenuCoords(null)
+                    handleConvertProposal(activeActionProp)
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-purple-50 hover:text-purple-700 flex items-center gap-2.5 transition-colors cursor-pointer"
+                >
+                  <Receipt className="w-3.5 h-3.5 text-purple-600" />
+                  <span>Convert to Invoice</span>
+                </button>
+              )}
+
+              <a
+                href={`https://wa.me/${(activeActionProp.clientPhone || activeActionProp.phone || '').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
+                  `Greetings ${activeActionProp.preparedFor || activeActionProp.customerName},\n\nBrothers Furniture (Ambattur Industrial Estate) has prepared your commercial fit-out proposal ref *${activeActionProp.proposalNumber}* for *₹${activeActionProp.total.toLocaleString(
+                    'en-IN'
+                  )}*.\n\nItems included:\n${activeActionProp.items
+                    .map((it) => `• ${it.name} (Qty: ${it.quantity})`)
+                    .join('\n')}\n\nOur executive will coordinate with you for layout validation.`
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => {
+                  setOpenActionMenuId(null)
+                  setActionMenuCoords(null)
+                }}
+                className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Share via WhatsApp</span>
+              </a>
+            </div>
+
+            <div className="py-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenActionMenuId(null)
+                  setActionMenuCoords(null)
+                  handleDeleteProposal(activeActionProp)
+                }}
+                className="w-full text-left px-3.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                <span>Delete Proposal</span>
+              </button>
+            </div>
+          </div>,
+          document.body
+        )}
 
       {/* 4. DRAFT PROPOSAL SLIDE-OVER DRAWER (WITH RICH PRODUCT SELECTOR) */}
       <Drawer
@@ -1461,32 +1605,86 @@ export const ProposalsView: React.FC = () => {
             </div>
           </div>
 
-          {/* Proposal For Details (Client Name, Phone Number, Address) */}
-          <div className="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/80 space-y-3">
+          {/* Proposal For Details (Customer Dropdown from Customer Page + Manual Fields) */}
+          <div className="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/80 space-y-3.5">
             <div className="flex items-center justify-between">
               <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                <User className="w-3.5 h-3.5 text-orange-500" />
-                Proposal For Details
+                <Building2 className="w-3.5 h-3.5 text-orange-500" />
+                Customer &amp; Client Details
               </h4>
-              <span className="text-[10px] text-slate-400 font-medium">Customer / Client Information</span>
+              <span className="text-[10px] text-slate-400 font-medium">Customer Directory Integration</span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+            {/* Customer Dropdown */}
+            <div>
+              <label className="text-[11px] font-semibold text-slate-700 block mb-1 flex items-center justify-between">
+                <span>Select from Customer Directory</span>
+                {selectedCustomerId && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCustomerId('')}
+                    className="text-[10px] text-orange-600 hover:text-orange-700 font-medium cursor-pointer"
+                  >
+                    Clear / Manual Entry
+                  </button>
+                )}
+              </label>
+              <SearchableSelect
+                value={selectedCustomerId}
+                onChange={handleCustomerSelect}
+                options={customerOptions}
+                placeholder="Choose existing customer (auto-fills details below) or type manually..."
+                clearable
+                onClear={() => setSelectedCustomerId('')}
+                accentColor="orange"
+                prefixIcon={<Building2 className="w-3.5 h-3.5 text-slate-400" />}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="text-[11px] font-semibold text-slate-700 block mb-1">
-                  Prepared For / Client <span className="text-orange-500">*</span>
+                  Prepared For / Contact Person <span className="text-orange-500">*</span>
                 </label>
                 <input
                   required
                   type="text"
                   value={clientForm.preparedFor}
                   onChange={(e) => setClientForm({ ...clientForm, preparedFor: e.target.value })}
-                  placeholder="e.g. Acme Tech Solutions / Rajesh Kumar"
+                  placeholder="e.g. Rajesh Kumar"
                   className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition"
                 />
               </div>
               <div>
                 <label className="text-[11px] font-semibold text-slate-700 block mb-1">
-                  Number
+                  Company / Entity Name
+                </label>
+                <input
+                  type="text"
+                  value={clientForm.companyName}
+                  onChange={(e) => setClientForm({ ...clientForm, companyName: e.target.value })}
+                  placeholder="e.g. Acme Tech Solutions"
+                  className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                  Client GSTIN
+                </label>
+                <input
+                  type="text"
+                  value={clientForm.clientGstin}
+                  onChange={(e) => setClientForm({ ...clientForm, clientGstin: e.target.value })}
+                  placeholder="e.g. 33AABCT9981M1ZX"
+                  className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-mono uppercase text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                  Phone Number
                 </label>
                 <input
                   type="tel"
@@ -1496,18 +1694,31 @@ export const ProposalsView: React.FC = () => {
                   className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition"
                 />
               </div>
-              <div className="sm:col-span-2">
+              <div>
                 <label className="text-[11px] font-semibold text-slate-700 block mb-1">
-                  Address
+                  Email Address
                 </label>
-                <textarea
-                  rows={2}
-                  value={clientForm.address}
-                  onChange={(e) => setClientForm({ ...clientForm, address: e.target.value })}
-                  placeholder="e.g. 4th Floor, Phase 2, TIDEL Park, Rajiv Gandhi Salai, Taramani, Chennai, Tamil Nadu 600113"
-                  className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition resize-none"
+                <input
+                  type="email"
+                  value={clientForm.email}
+                  onChange={(e) => setClientForm({ ...clientForm, email: e.target.value })}
+                  placeholder="e.g. procurement@acmetech.com"
+                  className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition"
                 />
               </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-semibold text-slate-700 block mb-1">
+                Site Delivery Address
+              </label>
+              <textarea
+                rows={2}
+                value={clientForm.address}
+                onChange={(e) => setClientForm({ ...clientForm, address: e.target.value })}
+                placeholder="e.g. 4th Floor, Phase 2, TIDEL Park, Rajiv Gandhi Salai, Taramani, Chennai, Tamil Nadu 600113"
+                className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition resize-none"
+              />
             </div>
           </div>
 
@@ -1633,8 +1844,8 @@ export const ProposalsView: React.FC = () => {
                     className="font-bold text-orange-600 hover:text-orange-700 hover:underline cursor-pointer flex items-center gap-1"
                   >
                     {selectedProductIds.length > 0 &&
-                    currentProductList.length > 0 &&
-                    currentProductList.every((p) => selectedProductIds.includes(p.id)) ? (
+                      currentProductList.length > 0 &&
+                      currentProductList.every((p) => selectedProductIds.includes(p.id)) ? (
                       <>
                         <RotateCcw className="w-3.5 h-3.5 text-orange-600" />
                         <span>Deselect All</span>
@@ -1653,11 +1864,10 @@ export const ProposalsView: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setShowAllCatalogInProducts(!showAllCatalogInProducts)}
-                        className={`font-semibold cursor-pointer text-[10.5px] px-2 py-0.5 rounded transition ${
-                          showAllCatalogInProducts
+                        className={`font-semibold cursor-pointer text-[10.5px] px-2 py-0.5 rounded transition ${showAllCatalogInProducts
                             ? 'bg-orange-50 text-orange-700 font-bold border border-orange-200'
                             : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
-                        }`}
+                          }`}
                         title="Toggle view between filtered subset and full catalog"
                       >
                         {showAllCatalogInProducts ? 'Showing All Catalog' : 'View All Catalog'}
@@ -1750,7 +1960,7 @@ export const ProposalsView: React.FC = () => {
                           alt={item.name}
                           className="w-14 h-14 sm:w-16 sm:h-16 rounded-lg object-cover bg-slate-50 border border-slate-200"
                           onError={(e) => {
-                            ;(e.target as HTMLImageElement).src =
+                            ; (e.target as HTMLImageElement).src =
                               'https://images.unsplash.com/photo-1580480055273-228ff5388ef8?auto=format&fit=crop&w=150&q=70'
                           }}
                         />
@@ -1947,11 +2157,10 @@ export const ProposalsView: React.FC = () => {
             <button
               type="submit"
               disabled={builderItems.length === 0}
-              className={`px-5 py-2 rounded-xl text-white text-xs font-bold shadow-xs transition inline-flex items-center gap-2 ${
-                builderItems.length === 0
+              className={`px-5 py-2 rounded-xl text-white text-xs font-bold shadow-xs transition inline-flex items-center gap-2 ${builderItems.length === 0
                   ? 'bg-slate-200 cursor-not-allowed text-slate-400'
                   : 'bg-blue-600 hover:bg-blue-700 cursor-pointer active:scale-95'
-              }`}
+                }`}
             >
               {editingProposalId ? <FileEdit className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
               <span>
