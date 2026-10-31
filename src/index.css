@@ -369,3 +369,28 @@ h1, h2, h3, h4, h5, h6 {
   animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+/* Print / PDF Export Styles for Proposals & Invoices */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  nav, aside, header, .print\:hidden {
+    display: none !important;
+  }
+
+  .fixed, .overflow-y-auto {
+    position: static !important;
+    overflow: visible !important;
+    max-height: none !important;
+  }
+}
+

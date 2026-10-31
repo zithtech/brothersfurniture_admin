@@ -12,8 +12,11 @@ export interface SelectOption {
 }
 
 export interface SearchableSelectProps {
-  value: string
-  onChange: (value: string) => void
+  value?: string
+  onChange?: (value: string) => void
+  isMulti?: boolean
+  multiValue?: string[]
+  onMultiChange?: (values: string[]) => void
   options: (string | SelectOption)[]
   placeholder?: string
   searchPlaceholder?: string
@@ -69,8 +72,11 @@ export function getBadgeColorForLabel(label: string): string {
 }
 
 export const SearchableSelect: React.FC<SearchableSelectProps> = ({
-  value,
+  value = '',
   onChange,
+  isMulti = false,
+  multiValue = [],
+  onMultiChange,
   options,
   placeholder = 'Select option...',
   searchPlaceholder = 'Search...',
@@ -132,6 +138,17 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
       )
     })
   }, [normalizedOptions, searchQuery])
+
+  // Multi-select master toggle items
+  const itemIds = useMemo(() => {
+    return normalizedOptions.filter((o) => o.value !== '__all__').map((o) => o.value)
+  }, [normalizedOptions])
+
+  const isAllItemsSelected = Boolean(
+    isMulti &&
+    itemIds.length > 0 &&
+    itemIds.every((id) => (multiValue || []).includes(id))
+  )
 
   // Is exact match found in current options
   const isExactMatch = useMemo(() => {
@@ -201,16 +218,35 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
   }, [highlightedIndex])
 
   const handleSelect = (val: string) => {
-    onChange(val)
-    setIsOpen(false)
+    if (isMulti) {
+      if (val === '__all__') {
+        const itemIds = normalizedOptions.filter((o) => o.value !== '__all__').map((o) => o.value)
+        const cur = multiValue || []
+        const isAllSelected = itemIds.length > 0 && itemIds.every((id) => cur.includes(id))
+        if (isAllSelected) {
+          onMultiChange?.([])
+        } else {
+          onMultiChange?.(itemIds)
+        }
+        return
+      }
+      const cur = multiValue || []
+      const next = cur.includes(val) ? cur.filter((v) => v !== val) : [...cur, val]
+      onMultiChange?.(next)
+    } else {
+      onChange?.(val)
+      setIsOpen(false)
+    }
   }
 
   const handleClear = (e: React.MouseEvent) => {
     e.stopPropagation()
     if (onClear) {
       onClear()
+    } else if (isMulti) {
+      onMultiChange?.([])
     } else {
-      onChange('')
+      onChange?.('')
     }
   }
 
@@ -259,7 +295,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
         if (onCustomSelect) {
           onCustomSelect(searchQuery.trim())
         } else {
-          onChange(searchQuery.trim())
+          onChange?.(searchQuery.trim())
         }
         setIsOpen(false)
       }
@@ -299,8 +335,42 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
             : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
         }`}
       >
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          {selectedOption ? (
+        <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+          {isMulti ? (
+            multiValue && multiValue.length > 0 ? (
+              <div className="flex items-center gap-1.5 flex-nowrap min-w-0 flex-1 overflow-hidden">
+                {isAllItemsSelected ? (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-orange-100 text-orange-950 font-bold text-xs border border-orange-300 shadow-2xs whitespace-nowrap truncate">
+                    ★ All {multiValue.length} Selected
+                  </span>
+                ) : (
+                  <>
+                    <span className="font-bold text-slate-900 text-xs shrink-0 whitespace-nowrap">
+                      {multiValue.length} selected:
+                    </span>
+                    {multiValue.slice(0, 1).map((val) => {
+                      const opt = normalizedOptions.find((o) => o.value === val)
+                      return (
+                        <span
+                          key={val}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-orange-100 text-orange-900 text-[11px] font-semibold border border-orange-300 truncate max-w-[160px] whitespace-nowrap"
+                        >
+                          {opt?.label || val}
+                        </span>
+                      )
+                    })}
+                    {multiValue.length > 1 && (
+                      <span className="text-[10.5px] font-bold text-orange-700 bg-orange-100 px-1.5 py-0.5 rounded shrink-0 whitespace-nowrap">
+                        +{multiValue.length - 1} more
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : (
+              <span className="text-slate-400 font-medium truncate text-xs">{placeholder}</span>
+            )
+          ) : selectedOption ? (
             <>
               {showBadge && (
                 <span
@@ -333,13 +403,13 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
           )}
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1 shrink-0 ml-1.5 pl-1.5 border-l border-slate-100">
           {/* Clear button when value is present */}
-          {clearable && !disabled && (value || selectedOption) && (
+          {clearable && !disabled && (isMulti ? (multiValue && multiValue.length > 0) : (value || selectedOption)) && (
             <button
               type="button"
               onClick={handleClear}
-              className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md transition cursor-pointer"
+              className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition cursor-pointer"
               title="Clear selection"
               aria-label="Clear selection"
             >
@@ -350,7 +420,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
           {/* Chevron indicator */}
           <ChevronDown
             className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${
-              isOpen ? 'rotate-180 text-blue-500' : ''
+              isOpen ? (isBlue ? 'rotate-180 text-blue-500' : 'rotate-180 text-orange-500') : ''
             }`}
           />
         </div>
@@ -390,11 +460,41 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
             </div>
           </div>
 
+          {/* Multi-Select Select All / Clear Bar */}
+          {isMulti && (
+            <div className="px-2.5 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between text-[11px] font-semibold">
+              <button
+                type="button"
+                onClick={() => {
+                  const allFiltered = filteredOptions.filter((o) => o.value !== '__all__').map((o) => o.value)
+                  const union = Array.from(new Set([...(multiValue || []), ...allFiltered]))
+                  onMultiChange?.(union)
+                }}
+                className="text-orange-600 hover:text-orange-700 hover:underline cursor-pointer"
+              >
+                Select All ({filteredOptions.filter((o) => o.value !== '__all__').length})
+              </button>
+              {(multiValue || []).length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onMultiChange?.([])}
+                  className="text-slate-500 hover:text-rose-600 hover:underline cursor-pointer"
+                >
+                  Clear Selection ({(multiValue || []).length})
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Options List */}
           <div ref={listRef} className="max-h-56 overflow-y-auto p-1.5 space-y-0.5">
             {filteredOptions.length > 0 ? (
               filteredOptions.map((opt, idx) => {
-                const isSelected = opt.value === value
+                const isSelected = isMulti
+                  ? opt.value === '__all__'
+                    ? isAllItemsSelected
+                    : (multiValue || []).includes(opt.value)
+                  : opt.value === value
                 const isHighlighted = idx === highlightedIndex
 
                 return (
@@ -414,6 +514,17 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
                     }`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      {isMulti && (
+                        <div
+                          className={`w-4 h-4 rounded border flex items-center justify-center transition shrink-0 ${
+                            isSelected
+                              ? 'bg-orange-600 border-orange-600 text-white'
+                              : 'border-slate-300 bg-white'
+                          }`}
+                        >
+                          {isSelected && <Check className="w-3 h-3 text-white stroke-[3]" />}
+                        </div>
+                      )}
                       {showBadge && (
                         <span
                           className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs ${
@@ -435,7 +546,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
                       </div>
                     </div>
 
-                    {isSelected && (
+                    {!isMulti && isSelected && (
                       <Check className={`w-4 h-4 shrink-0 ml-2 ${checkColorClass}`} strokeWidth={2.5} />
                     )}
                   </div>
@@ -451,7 +562,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
                       if (onCustomSelect) {
                         onCustomSelect(searchQuery.trim())
                       } else {
-                        onChange(searchQuery.trim())
+                        onChange?.(searchQuery.trim())
                       }
                       setIsOpen(false)
                     }}
@@ -484,10 +595,12 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
             )}
           </div>
 
-          {/* Footer Bar Showing Item Count (Matching Reference Design) */}
+          {/* Footer Bar Showing Item Count */}
           <div className="border-t border-slate-100 bg-slate-50/70 px-3 py-1.5 text-[11px] text-slate-400 font-medium flex items-center justify-between select-none">
             <span>
-              {searchQuery.trim()
+              {isMulti
+                ? `${(multiValue || []).length} of ${normalizedOptions.length} ${footerCountLabel} selected`
+                : searchQuery.trim()
                 ? `Showing ${filteredOptions.length} of ${normalizedOptions.length} ${footerCountLabel}`
                 : `${normalizedOptions.length} ${footerCountLabel}`}
             </span>

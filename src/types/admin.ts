@@ -304,6 +304,13 @@ export interface OrderItem {
   quantity: number
   unitPrice: number
   category: Category
+  image?: string
+  type?: string
+  subCategory?: string
+  sku?: string
+  material?: string
+  dimensions?: string
+  total?: number
 }
 
 export interface Order {
@@ -323,6 +330,127 @@ export interface Order {
   createdAt: string
   targetDeliveryDate?: string
   notes?: string
+}
+
+export type ProposalStatus = 'draft' | 'sent' | 'under_review' | 'approved' | 'rejected' | 'converted'
+
+export interface ProposalItem {
+  id: string
+  productId: string
+  name: string
+  image: string
+  images?: string[]
+  type: string
+  category: Category
+  subCategory?: string
+  quantity: number
+  unitPrice: number
+  discountPercent?: number
+  discountAmount?: number
+  total: number
+  material?: string
+  dimensions?: string
+  sku?: string
+  notes?: string
+}
+
+export interface Proposal {
+  id: string
+  proposalNumber: string
+  title: string
+  preparedFor?: string
+  customerName: string
+  companyName?: string
+  phone: string
+  clientPhone?: string
+  email: string
+  clientGstin?: string
+  deliveryAddress: string
+  clientAddress?: string
+  targetDeliveryDate?: string
+  validUntil: string
+  status: ProposalStatus
+  items: ProposalItem[]
+  subtotal: number
+  discountPercent?: number
+  discountAmount?: number
+  deliveryFee: number
+  taxRate: number // default 18
+  taxAmount: number
+  total: number
+  notes?: string
+  projectScope?: string
+  termsAndConditions?: string[]
+  createdAt: string
+  updatedAt?: string
+  convertedInvoiceId?: string
+  pdfUrl?: string
+  r2Key?: string
+}
+
+export type InvoiceStatus = 'paid' | 'advance_received' | 'pending' | 'overdue' | 'cancelled'
+export type PaymentMode = 'neft_rtgs' | 'upi' | 'cheque' | 'card' | 'cash'
+
+export interface InvoiceItem {
+  id: string
+  productId: string
+  name: string
+  image: string
+  hsnCode?: string // default "9403"
+  quantity: number
+  unitPrice: number
+  material?: string
+  dimensions?: string
+  sku?: string
+  total: number
+}
+
+export interface Invoice {
+  id: string
+  invoiceNumber: string
+  proposalRef?: string
+  poNumber?: string
+  customerName: string
+  companyName?: string
+  phone: string
+  email: string
+  clientGstin?: string
+  billingAddress: string
+  shippingAddress: string
+  issueDate: string
+  dueDate: string
+  status: InvoiceStatus
+  paymentMode?: PaymentMode
+  items: InvoiceItem[]
+  subtotal: number
+  discountAmount?: number
+  deliveryFee: number
+  cgstRate: number // default 9%
+  cgstAmount: number
+  sgstRate: number // default 9%
+  sgstAmount: number
+  taxAmount: number
+  total: number
+  amountPaid: number
+  balanceDue: number
+  notes?: string
+  paymentRef?: string
+  paidAt?: string
+  pdfUrl?: string
+  r2Key?: string
+  createdAt: string
+}
+
+export interface BankAccount {
+  id: string
+  bankName: string
+  accountName: string
+  accountNumber: string
+  ifscCode: string
+  branch?: string
+  upiId?: string
+  accountType?: 'Current' | 'Savings'
+  isDefault?: boolean
 }
 
 export interface ClientPartner {
@@ -350,6 +478,7 @@ export interface CompanySettings {
   addressLines: string[]
   phones: { display: string; tel: string }[]
   email: string
+  website?: string
   whatsapp: {
     number: string
     message: string
@@ -364,6 +493,8 @@ export interface CompanySettings {
   standardDeliveryFee: number
   bannerAnnouncement: string
   isBannerActive: boolean
+  bankAccounts?: BankAccount[]
+  signatureUrl?: string
 }
 
 export type AdminView = 
@@ -376,6 +507,8 @@ export type AdminView =
   | 'leads'
   | 'orders'
   | 'quotations'
+  | 'proposals'
+  | 'invoices'
   | 'clients'
   | 'testimonials'
   | 'settings'

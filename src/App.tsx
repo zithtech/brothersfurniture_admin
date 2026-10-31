@@ -10,11 +10,12 @@ import { RegisterView } from './views/auth/RegisterView'
 import { ClientsView } from './views/ClientsView'
 import { DashboardView } from './views/DashboardView'
 import { ErgonomicChairsView } from './views/ErgonomicChairsView'
+import { InvoicesView } from './views/InvoicesView'
 import { LeadsView } from './views/LeadsView'
 import { OrdersView } from './views/OrdersView'
 import { ProductsView } from './views/ProductsView'
 import { ProductSettingsView } from './views/ProductSettingsView'
-import { QuotationsView } from './views/QuotationsView'
+import { ProposalsView } from './views/ProposalsView'
 import { RecycleBinView } from './views/RecycleBinView'
 import { SettingsView } from './views/SettingsView'
 import { TestimonialsView } from './views/TestimonialsView'
@@ -72,7 +73,8 @@ const AdminContent: React.FC = () => {
           )}
 
           {currentView === 'orders' && <OrdersView />}
-          {currentView === 'quotations' && <QuotationsView />}
+          {(currentView === 'quotations' || currentView === 'proposals') && <ProposalsView />}
+          {currentView === 'invoices' && <InvoicesView />}
 
           {currentView === 'clients' && <ClientsView />}
 
