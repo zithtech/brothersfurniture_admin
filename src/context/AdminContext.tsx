@@ -21,13 +21,18 @@ import type {
   DeletedProduct,
   DeletedType,
   ErgonomicChairModel,
+  Invoice,
+  InvoiceStatus,
   Lead,
   LeadStatus,
   Order,
   OrderStatus,
+  PaymentMode,
   PaymentStatus,
   Product,
   ProductionSettings,
+  Proposal,
+  ProposalStatus,
   SubCategoryConfig,
   TestimonialReview,
   ToastAction,
@@ -118,6 +123,23 @@ interface AdminContextType {
   updateOrderPayment: (id: string, paymentStatus: PaymentStatus) => void
   deleteOrder: (id: string) => void
 
+  // Commercial Proposals
+  proposals: Proposal[]
+  addProposal: (proposal: Omit<Proposal, 'id' | 'proposalNumber' | 'createdAt'>) => Promise<Proposal>
+  updateProposal: (id: string, partial: Partial<Proposal>) => void
+  deleteProposal: (id: string) => void
+  updateProposalStatus: (id: string, status: ProposalStatus) => void
+  convertProposalToInvoice: (proposalId: string) => Invoice | null
+  generateProposalPdf: (id: string, fallback?: Proposal) => Promise<string | null>
+
+  // Invoices & Billing
+  invoices: Invoice[]
+  addInvoice: (invoice: Omit<Invoice, 'id' | 'invoiceNumber' | 'createdAt'>) => Promise<Invoice>
+  updateInvoice: (id: string, partial: Partial<Invoice>) => void
+  deleteInvoice: (id: string) => void
+  recordInvoicePayment: (id: string, amount: number, mode?: PaymentMode, ref?: string) => void
+  generateInvoicePdf: (id: string, fallback?: Invoice) => Promise<string | null>
+
   // Clients
   clients: ClientPartner[]
   addClient: (client: Omit<ClientPartner, 'id'>) => void
@@ -178,10 +200,22 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }
 
-  const [products, setProducts] = useState<Product[]>(() => loadStored('products', initialProducts))
+  const [products, setProducts] = useState<Product[]>(() => {
+    const loaded = loadStored<Product[]>('products', initialProducts)
+    return loaded.map((p) => {
+      const initMatch = initialProducts.find((ip) => ip.id === p.id)
+      return {
+        ...p,
+        type: p.type || initMatch?.type || 'Chairs',
+        subCategory: p.subCategory || initMatch?.subCategory || '',
+      }
+    })
+  })
   const [chairs, setChairs] = useState<ErgonomicChairModel[]>(() => loadStored('chairs', initialChairs))
   const [leads, setLeads] = useState<Lead[]>(() => loadStored('leads', initialLeads))
   const [orders, setOrders] = useState<Order[]>(() => loadStored('orders', initialOrders))
+  const [proposals, setProposals] = useState<Proposal[]>(() => loadStored<Proposal[]>('proposals', []))
+  const [invoices, setInvoices] = useState<Invoice[]>(() => loadStored<Invoice[]>('invoices', []))
   const [clients, setClients] = useState<ClientPartner[]>(() => loadStored('clients', initialClients))
   const [testimonials, setTestimonials] = useState<TestimonialReview[]>(() => loadStored('testimonials', initialTestimonials))
   const [settings, setSettings] = useState<CompanySettings>(() => loadStored('settings', initialSettings))
@@ -305,7 +339,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setIsSyncing(true)
     try {
       await api.checkHealth()
-      const [prods, chrs, lds, ords, cls, tests, setts] = await Promise.all([
+      const [prods, chrs, lds, ords, cls, tests, setts, props, invs] = await Promise.all([
         api.getProducts(),
         api.getChairs(),
         api.getLeads(),
@@ -313,6 +347,8 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         api.getClients(),
         api.getTestimonials(),
         api.getSettings(),
+        api.getProposals().catch(() => []),
+        api.getInvoices().catch(() => []),
       ])
       // Filter out products currently in Recycle Bin to prevent reviving deleted items
       const binProds: DeletedProduct[] = loadStored('bin_products', [])
@@ -324,6 +360,8 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setClients(cls)
       setTestimonials(tests)
       setSettings(setts)
+      if (Array.isArray(props) && props.length > 0) setProposals(props)
+      if (Array.isArray(invs) && invs.length > 0) setInvoices(invs)
       setIsBackendConnected(true)
     } catch (e) {
       console.warn('Backend server currently offline, running in offline localStorage mode.', e)
@@ -384,6 +422,8 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => { localStorage.setItem(STORAGE_KEY_PREFIX + 'chairs', JSON.stringify(chairs)) }, [chairs])
   useEffect(() => { localStorage.setItem(STORAGE_KEY_PREFIX + 'leads', JSON.stringify(leads)) }, [leads])
   useEffect(() => { localStorage.setItem(STORAGE_KEY_PREFIX + 'orders', JSON.stringify(orders)) }, [orders])
+  useEffect(() => { localStorage.setItem(STORAGE_KEY_PREFIX + 'proposals', JSON.stringify(proposals)) }, [proposals])
+  useEffect(() => { localStorage.setItem(STORAGE_KEY_PREFIX + 'invoices', JSON.stringify(invoices)) }, [invoices])
   useEffect(() => { localStorage.setItem(STORAGE_KEY_PREFIX + 'clients', JSON.stringify(clients)) }, [clients])
   useEffect(() => { localStorage.setItem(STORAGE_KEY_PREFIX + 'testimonials', JSON.stringify(testimonials)) }, [testimonials])
   useEffect(() => { localStorage.setItem(STORAGE_KEY_PREFIX + 'settings', JSON.stringify(settings)) }, [settings])
@@ -1152,6 +1192,273 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }
 
+  // Commercial Proposal Operations
+  const addProposal = async (p: Omit<Proposal, 'id' | 'proposalNumber' | 'createdAt'>): Promise<Proposal> => {
+    const year = new Date().getFullYear()
+    const prefix = `BF-PROP-${year}-`
+    let maxNum = 0
+    for (const prop of proposals) {
+      if (prop.proposalNumber && prop.proposalNumber.startsWith(prefix)) {
+        const num = parseInt(prop.proposalNumber.replace(prefix, ''), 10)
+        if (!isNaN(num) && num > maxNum) {
+          maxNum = num
+        }
+      }
+    }
+    const nextPropNum = String(Math.max(maxNum + 1, proposals.length + 1)).padStart(4, '0')
+    const newProposal: Proposal = {
+      ...p,
+      id: `prop-${Date.now()}`,
+      proposalNumber: `${prefix}${nextPropNum}`,
+      createdAt: new Date().toISOString(),
+    }
+    setProposals((prev) => [newProposal, ...prev])
+
+    if (isBackendConnected) {
+      try {
+        const saved = await api.createProposal(newProposal)
+        if (saved) {
+          const merged = { ...newProposal, ...saved }
+          setProposals((prev) =>
+            prev.map((item) => (item.id === newProposal.id ? merged : item))
+          )
+          addToast('success', 'Proposal Created', `Commercial Proposal ${merged.proposalNumber} generated.`)
+          return merged
+        }
+      } catch (err) {
+        console.error('Failed to sync proposal to backend:', err)
+      }
+    }
+    addToast('success', 'Proposal Created', `Commercial Proposal ${newProposal.proposalNumber} generated.`)
+    return newProposal
+  }
+
+  const updateProposal = (id: string, partial: Partial<Proposal>) => {
+    setProposals((prev) =>
+      prev.map((prop) =>
+        prop.id === id ? { ...prop, ...partial, updatedAt: new Date().toISOString() } : prop
+      )
+    )
+    addToast('info', 'Proposal Updated', 'Commercial proposal updated.')
+
+    if (isBackendConnected) {
+      api.updateProposal(id, partial).catch((err) => console.error('Failed to update proposal on backend:', err))
+    }
+  }
+
+  const deleteProposal = (id: string) => {
+    setProposals((prev) => prev.filter((prop) => prop.id !== id))
+    addToast('warning', 'Proposal Deleted', 'Proposal has been removed.')
+
+    if (isBackendConnected) {
+      api.deleteProposal(id).catch((err) => console.error('Failed to delete proposal on backend:', err))
+    }
+  }
+
+  const updateProposalStatus = (id: string, status: ProposalStatus) => {
+    setProposals((prev) =>
+      prev.map((prop) =>
+        prop.id === id ? { ...prop, status, updatedAt: new Date().toISOString() } : prop
+      )
+    )
+    addToast('info', 'Proposal Status Updated', `Status marked as ${status.replace(/_/g, ' ').toUpperCase()}.`)
+
+    if (isBackendConnected) {
+      api.updateProposalStatus(id, status).catch((err) => console.error('Failed to update proposal status on backend:', err))
+    }
+  }
+
+  const generateProposalPdf = async (id: string, fallback?: Proposal): Promise<string | null> => {
+    try {
+      addToast('info', 'Generating Proposal PDF...', 'Puppeteer is rendering executive document and uploading to Cloudflare R2.')
+      const res = await api.generateProposalPdf(id, fallback)
+      if (res && res.pdfUrl) {
+        setProposals((prev) =>
+          prev.map((prop) =>
+            prop.id === id ? { ...prop, pdfUrl: res.pdfUrl, r2Key: res.r2Key, updatedAt: new Date().toISOString() } : prop
+          )
+        )
+        addToast('success', 'Stored in Cloudflare R2', 'Proposal PDF successfully uploaded and hosted on Cloudflare R2.')
+        return res.pdfUrl
+      }
+      return null
+    } catch (err: any) {
+      console.error('Failed to generate PDF in R2:', err)
+      addToast('error', 'PDF Generation Failed', err.message || 'Could not generate or store PDF in Cloudflare R2.')
+      return null
+    }
+  }
+
+  const convertProposalToInvoice = (proposalId: string): Invoice | null => {
+    const proposal = proposals.find((p) => p.id === proposalId)
+    if (!proposal) return null
+
+    const nextInvNum = String(invoices.length + 1).padStart(3, '0')
+    const invoiceNumber = `BF-INV-2026-${nextInvNum}`
+
+    // Calculate CGST and SGST (9% each = 18% total)
+    const taxableSubtotal = Math.max(0, proposal.subtotal - (proposal.discountAmount || 0))
+    const cgstAmount = Math.round(taxableSubtotal * 0.09)
+    const sgstAmount = Math.round(taxableSubtotal * 0.09)
+    const totalTax = cgstAmount + sgstAmount
+    const grandTotal = taxableSubtotal + proposal.deliveryFee + totalTax
+
+    const newInvoice: Invoice = {
+      id: `inv-${Date.now()}`,
+      invoiceNumber,
+      proposalRef: proposal.proposalNumber,
+      customerName: proposal.customerName,
+      companyName: proposal.companyName,
+      phone: proposal.phone,
+      email: proposal.email,
+      clientGstin: proposal.clientGstin,
+      billingAddress: proposal.deliveryAddress,
+      shippingAddress: proposal.deliveryAddress,
+      issueDate: new Date().toISOString().split('T')[0],
+      dueDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      status: 'pending',
+      items: proposal.items.map((it, idx) => ({
+        id: `iitem-${Date.now()}-${idx}`,
+        productId: it.productId,
+        name: it.name,
+        image: it.image,
+        hsnCode: '9403',
+        quantity: it.quantity,
+        unitPrice: it.unitPrice,
+        material: it.material,
+        dimensions: it.dimensions,
+        sku: it.sku,
+        total: it.total,
+      })),
+      subtotal: proposal.subtotal,
+      discountAmount: proposal.discountAmount || 0,
+      deliveryFee: proposal.deliveryFee,
+      cgstRate: 9,
+      cgstAmount,
+      sgstRate: 9,
+      sgstAmount,
+      taxAmount: totalTax,
+      total: grandTotal,
+      amountPaid: 0,
+      balanceDue: grandTotal,
+      notes: `Generated from Commercial Proposal ${proposal.proposalNumber}. ${proposal.notes || ''}`,
+      createdAt: new Date().toISOString(),
+    }
+
+    setInvoices((prev) => [newInvoice, ...prev])
+    updateProposal(proposalId, { status: 'converted', convertedInvoiceId: newInvoice.id })
+    addToast('success', 'Tax Invoice Generated', `Invoice ${invoiceNumber} created from Proposal ${proposal.proposalNumber}.`)
+
+    if (isBackendConnected) {
+      api.convertProposalToInvoice(proposalId).catch((err) => {
+        // Fallback: create invoice directly if convert endpoint didn't find proposal in db yet
+        console.warn('Convert endpoint error, syncing direct invoice:', err)
+        api.createInvoice(newInvoice).catch(() => {})
+      })
+    }
+    return newInvoice
+  }
+
+  // Invoices & Billing Operations
+  const addInvoice = async (inv: Omit<Invoice, 'id' | 'invoiceNumber' | 'createdAt'>): Promise<Invoice> => {
+    const nextInvNum = String(invoices.length + 1).padStart(3, '0')
+    const newInvoice: Invoice = {
+      ...inv,
+      id: `inv-${Date.now()}`,
+      invoiceNumber: `BF-INV-2026-${nextInvNum}`,
+      createdAt: new Date().toISOString(),
+    }
+    setInvoices((prev) => [newInvoice, ...prev])
+
+    if (isBackendConnected) {
+      try {
+        const saved = await api.createInvoice(newInvoice)
+        if (saved) {
+          const merged = { ...newInvoice, ...saved }
+          setInvoices((prev) =>
+            prev.map((item) => (item.id === newInvoice.id ? merged : item))
+          )
+          addToast('success', 'Invoice Generated', `Tax Invoice ${merged.invoiceNumber} created.`)
+          return merged
+        }
+      } catch (err) {
+        console.error('Failed to sync invoice to backend:', err)
+      }
+    }
+    addToast('success', 'Invoice Generated', `Tax Invoice ${newInvoice.invoiceNumber} created.`)
+    return newInvoice
+  }
+
+  const updateInvoice = (id: string, partial: Partial<Invoice>) => {
+    setInvoices((prev) =>
+      prev.map((inv) => (inv.id === id ? { ...inv, ...partial } : inv))
+    )
+    addToast('info', 'Invoice Updated', 'Invoice details have been updated.')
+
+    if (isBackendConnected) {
+      api.updateInvoice(id, partial).catch((err) => console.error('Failed to update invoice on backend:', err))
+    }
+  }
+
+  const deleteInvoice = (id: string) => {
+    setInvoices((prev) => prev.filter((inv) => inv.id !== id))
+    addToast('warning', 'Invoice Removed', 'Invoice deleted.')
+
+    if (isBackendConnected) {
+      api.deleteInvoice(id).catch((err) => console.error('Failed to delete invoice on backend:', err))
+    }
+  }
+
+  const generateInvoicePdf = async (id: string, fallback?: Invoice): Promise<string | null> => {
+    try {
+      addToast('info', 'Generating Invoice PDF...', 'Puppeteer is rendering tax invoice and uploading to Cloudflare R2.')
+      const res = await api.generateInvoicePdf(id, fallback)
+      if (res && res.pdfUrl) {
+        setInvoices((prev) =>
+          prev.map((inv) =>
+            inv.id === id ? { ...inv, pdfUrl: res.pdfUrl, r2Key: res.r2Key } : inv
+          )
+        )
+        addToast('success', 'Stored in Cloudflare R2', 'Invoice PDF successfully uploaded and hosted on Cloudflare R2.')
+        return res.pdfUrl
+      }
+      return null
+    } catch (err: any) {
+      console.error('Failed to generate invoice PDF in R2:', err)
+      addToast('error', 'PDF Generation Failed', err.message || 'Could not generate or store PDF in Cloudflare R2.')
+      return null
+    }
+  }
+
+  const recordInvoicePayment = (id: string, amount: number, mode: PaymentMode = 'neft_rtgs', ref?: string) => {
+    setInvoices((prev) =>
+      prev.map((inv) => {
+        if (inv.id !== id) return inv
+        const newPaid = Math.min(inv.total, (inv.amountPaid || 0) + amount)
+        const balance = Math.max(0, inv.total - newPaid)
+        const newStatus: InvoiceStatus = balance === 0 ? 'paid' : newPaid > 0 ? 'advance_received' : 'pending'
+        return {
+          ...inv,
+          amountPaid: newPaid,
+          balanceDue: balance,
+          status: newStatus,
+          paymentMode: mode,
+          paymentRef: ref || inv.paymentRef,
+          paidAt: new Date().toISOString(),
+        }
+      })
+    )
+    addToast('success', 'Payment Recorded', `₹${amount.toLocaleString('en-IN')} payment recorded successfully.`)
+
+    if (isBackendConnected) {
+      api.recordInvoicePayment(id, {
+        amount,
+        paymentMode: mode,
+        transactionReference: ref,
+      }).catch((err) => console.error('Failed to record payment on backend:', err))
+    }
+  }
+
   // Clients Operations
   const addClient = async (c: Omit<ClientPartner, 'id'>) => {
     const id = c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || `client-${Date.now()}`
@@ -1428,6 +1735,19 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         updateOrderStatus,
         updateOrderPayment,
         deleteOrder,
+        proposals,
+        addProposal,
+        updateProposal,
+        deleteProposal,
+        updateProposalStatus,
+        convertProposalToInvoice,
+        generateProposalPdf,
+        invoices,
+        addInvoice,
+        updateInvoice,
+        deleteInvoice,
+        recordInvoicePayment,
+        generateInvoicePdf,
         clients,
         addClient,
         updateClient,

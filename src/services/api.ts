@@ -9,6 +9,9 @@ import type {
   PaymentStatus,
   Product,
   TestimonialReview,
+  Proposal,
+  ProposalStatus,
+  Invoice,
 } from '../types/admin'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
@@ -162,6 +165,46 @@ export const api = {
   getSettings: () => request<CompanySettings>('/settings'),
   updateSettings: (settings: Partial<CompanySettings>) =>
     request<CompanySettings>('/settings', { method: 'PUT', body: JSON.stringify(settings) }),
+
+  // Commercial Proposals
+  getProposals: () => request<Proposal[]>('/proposals'),
+  createProposal: (proposal: any) => request<Proposal>('/proposals', { method: 'POST', body: JSON.stringify(proposal) }),
+  updateProposal: (id: string, partial: Partial<Proposal>) =>
+    request<Proposal>(`/proposals/${id}`, { method: 'PUT', body: JSON.stringify(partial) }),
+  updateProposalStatus: (id: string, status: ProposalStatus) =>
+    request<Proposal>(`/proposals/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }),
+  deleteProposal: (id: string) => request<{ success: boolean; message: string }>(`/proposals/${id}`, { method: 'DELETE' }),
+  convertProposalToInvoice: (proposalId: string) =>
+    request<Invoice>(`/proposals/${proposalId}/convert-to-invoice`, { method: 'POST' }),
+  generateProposalPdf: (id: string, fallback?: any) =>
+    request<{ success: boolean; pdfUrl: string; r2Key: string; size: number; proposal?: Proposal }>(
+      `/proposals/${id}/generate-pdf`,
+      { method: 'POST', body: fallback ? JSON.stringify(fallback) : undefined }
+    ),
+  generateProposalPdfOnTheFly: (payload: any) =>
+    request<{ success: boolean; pdfUrl: string; r2Key: string; size: number }>(
+      '/proposals/generate-pdf',
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
+
+  // GST Invoices & Billing
+  getInvoices: () => request<Invoice[]>('/invoices'),
+  createInvoice: (invoice: any) => request<Invoice>('/invoices', { method: 'POST', body: JSON.stringify(invoice) }),
+  updateInvoice: (id: string, partial: Partial<Invoice>) =>
+    request<Invoice>(`/invoices/${id}`, { method: 'PUT', body: JSON.stringify(partial) }),
+  deleteInvoice: (id: string) => request<{ success: boolean; message: string }>(`/invoices/${id}`, { method: 'DELETE' }),
+  recordInvoicePayment: (invoiceId: string, paymentData: { amount: number; paymentMode: string; transactionReference?: string; notes?: string }) =>
+    request<Invoice>(`/invoices/${invoiceId}/payments`, { method: 'POST', body: JSON.stringify(paymentData) }),
+  generateInvoicePdf: (id: string, fallback?: any) =>
+    request<{ success: boolean; pdfUrl: string; r2Key: string; size: number; invoice?: Invoice }>(
+      `/invoices/${id}/generate-pdf`,
+      { method: 'POST', body: fallback ? JSON.stringify(fallback) : undefined }
+    ),
+  generateInvoicePdfOnTheFly: (payload: any) =>
+    request<{ success: boolean; pdfUrl: string; r2Key: string; size: number }>(
+      '/invoices/generate-pdf',
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
 
   // Sync
   resetToDefaults: () => request<{ success: boolean; message: string }>('/sync/reset', { method: 'POST' }),
