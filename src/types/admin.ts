@@ -509,6 +509,7 @@ export type AdminView =
   | 'quotations'
   | 'proposals'
   | 'invoices'
+  | 'customers'
   | 'clients'
   | 'testimonials'
   | 'settings'

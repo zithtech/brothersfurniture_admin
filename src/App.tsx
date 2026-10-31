@@ -8,6 +8,7 @@ import { AdminManagementView } from './views/AdminManagementView'
 import { LoginView } from './views/auth/LoginView'
 import { RegisterView } from './views/auth/RegisterView'
 import { ClientsView } from './views/ClientsView'
+import { CustomerManagementView } from './views/customers/CustomerManagementView'
 import { DashboardView } from './views/DashboardView'
 import { ErgonomicChairsView } from './views/ErgonomicChairsView'
 import { InvoicesView } from './views/InvoicesView'
@@ -75,6 +76,8 @@ const AdminContent: React.FC = () => {
           {currentView === 'orders' && <OrdersView />}
           {(currentView === 'quotations' || currentView === 'proposals') && <ProposalsView />}
           {currentView === 'invoices' && <InvoicesView />}
+
+          {currentView === 'customers' && <CustomerManagementView />}
 
           {currentView === 'clients' && <ClientsView />}
 

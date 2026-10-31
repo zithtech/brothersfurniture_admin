@@ -29,6 +29,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
   const { addToast } = useAdmin()
 
   const [name, setName] = useState(user?.name || '')
+  const [nameError, setNameError] = useState<string | null>(null)
   const [phone, setPhone] = useState(user?.phone || '')
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl || '')
   const [showUrlInput, setShowUrlInput] = useState(false)
@@ -46,10 +47,95 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const validateName = (value: string): string | null => {
+    const trimmed = value.trim()
+    if (!trimmed) return 'Full legal name cannot be empty.'
+
+    if (/\d/.test(trimmed)) {
+      return 'Full legal name cannot contain numbers. Only alphabetic characters are allowed.'
+    }
+
+    if (!/^[a-zA-Z\s.'-]+$/.test(trimmed)) {
+      return 'Full legal name can only contain letters, spaces, hyphens, and apostrophes.'
+    }
+
+    if (trimmed.length < 2) {
+      return 'Full legal name must be at least 2 characters.'
+    }
+
+    return null
+  }
+
+  const handleNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (
+      [
+        'Backspace',
+        'Delete',
+        'ArrowLeft',
+        'ArrowRight',
+        'ArrowUp',
+        'ArrowDown',
+        'Tab',
+        'Enter',
+        'Home',
+        'End',
+      ].includes(e.key) ||
+      e.ctrlKey ||
+      e.metaKey
+    ) {
+      return
+    }
+
+    if (/\d/.test(e.key)) {
+      e.preventDefault()
+      setNameError('Numbers are not allowed in full legal name. Please enter alphabetic characters only.')
+      return
+    }
+  }
+
+  const handleNamePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pasted = e.clipboardData.getData('text')
+    if (/\d/.test(pasted)) {
+      e.preventDefault()
+      const sanitized = pasted.replace(/\d/g, '')
+      const input = e.currentTarget
+      const start = input.selectionStart || 0
+      const end = input.selectionEnd || 0
+      const newName = name.slice(0, start) + sanitized + name.slice(end)
+      setName(newName)
+      setNameError('Numbers are not allowed in full legal name. Only alphabetic characters are accepted.')
+    }
+  }
+
+  const handleNameChange = (val: string) => {
+    const hasDigits = /\d/.test(val)
+    const sanitized = val.replace(/\d/g, '')
+    setName(sanitized)
+
+    if (hasDigits) {
+      setNameError('Full legal name cannot contain numbers. Only alphabetic characters are allowed.')
+      return
+    }
+
+    if (sanitized.trim()) {
+      if (!/^[a-zA-Z\s.'-]+$/.test(sanitized)) {
+        setNameError('Full legal name can only contain letters, spaces, hyphens, and apostrophes.')
+        return
+      }
+      setNameError(null)
+      if (errorMsg?.toLowerCase().includes('name')) {
+        setErrorMsg(null)
+      }
+    } else {
+      setNameError(null)
+    }
+  }
+
   // Reset state when modal opens
   React.useEffect(() => {
     if (user && isOpen) {
       setName(user.name || '')
+      setNameError(null)
       setPhone(user.phone || '')
       setAvatarUrl(user.avatarUrl || '')
       setCurrentPassword('')
@@ -101,8 +187,32 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
     setErrorMsg(null)
 
     if (!name.trim()) {
-      setErrorMsg('Full name cannot be empty.')
+      setErrorMsg('Full legal name cannot be empty.')
+      setNameError('Full legal name cannot be empty.')
       return
+    }
+
+    const nError = validateName(name)
+    if (nError) {
+      setErrorMsg(nError)
+      setNameError(nError)
+      return
+    }
+
+    if (phone.trim()) {
+      if (/[a-zA-Z]/.test(phone.trim())) {
+        setErrorMsg('Alphabetic characters are not allowed in phone number.')
+        return
+      }
+      const phoneDigits = phone.trim().replace(/\D/g, '')
+      if (phoneDigits.length > 15) {
+        setErrorMsg('Phone number cannot exceed the allowed length of 15 digits.')
+        return
+      }
+      if (phoneDigits.length < 10) {
+        setErrorMsg('Phone number must be at least 10 digits.')
+        return
+      }
     }
 
     if (isChangingPassword) {
@@ -266,12 +376,28 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
               <input
                 type="text"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => handleNameChange(e.target.value)}
+                onKeyDown={handleNameKeyDown}
+                onPaste={handleNamePaste}
+                onBlur={() => {
+                  if (name.trim()) setNameError(validateName(name))
+                }}
                 placeholder="e.g. Karthikeyan"
                 required
-                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium focus:bg-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-hidden"
+                aria-invalid={!!nameError}
+                className={`w-full pl-9 pr-3 py-2 bg-slate-50 border rounded-xl text-xs sm:text-sm font-medium focus:bg-white focus:ring-2 outline-hidden transition-colors ${
+                  nameError
+                    ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-500/20 text-rose-900'
+                    : 'border-slate-200 focus:border-orange-500 focus:ring-orange-500/20 text-slate-900'
+                }`}
               />
             </div>
+            {nameError && (
+              <p className="mt-1 text-[11px] text-rose-600 flex items-center gap-1 font-medium">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>{nameError}</span>
+              </p>
+            )}
           </div>
 
           {/* Email (Read-Only) */}
@@ -308,9 +434,32 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
                 </div>
                 <input
                   type="tel"
+                  inputMode="tel"
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  onChange={(e) => {
+                    const sanitized = e.target.value.replace(/[a-zA-Z]/g, '').replace(/[^\d+\s\-()]/g, '')
+                    setPhone(sanitized)
+                    if (/[a-zA-Z]/.test(e.target.value)) {
+                      setErrorMsg('Alphabetic characters are not allowed in phone number.')
+                    } else if (errorMsg?.includes('Alphabetic')) {
+                      setErrorMsg(null)
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (
+                      ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'].includes(e.key) ||
+                      e.ctrlKey ||
+                      e.metaKey
+                    ) {
+                      return
+                    }
+                    if (/[a-zA-Z]/.test(e.key) || !/[\d+\s\-()]/.test(e.key)) {
+                      e.preventDefault()
+                      setErrorMsg('Alphabetic characters are not allowed. Please enter numeric digits only.')
+                    }
+                  }}
                   placeholder="9790740027"
+                  maxLength={25}
                   className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium focus:bg-white focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-hidden"
                 />
               </div>

@@ -50,7 +50,7 @@ export const Drawer: React.FC<DrawerProps> = ({
 
       {/* Slide-over Drawer Panel */}
       <div
-        className={`relative w-full ${maxWidth} h-full flex flex-col bg-white border-l border-slate-200/90 shadow-2xl z-10 animate-drawer-in`}
+        className={`relative w-full ${maxWidth} h-full flex flex-col bg-white text-slate-900 border-l border-slate-200/90 shadow-2xl z-10 animate-drawer-in`}
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
