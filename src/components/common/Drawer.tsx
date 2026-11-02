@@ -5,10 +5,12 @@ import { X } from 'lucide-react'
 interface DrawerProps {
   isOpen: boolean
   onClose: () => void
-  title: string
-  subtitle?: string
+  title: React.ReactNode
+  subtitle?: React.ReactNode
   children: React.ReactNode
   maxWidth?: string
+  headerRight?: React.ReactNode
+  bodyClassName?: string
 }
 
 export const Drawer: React.FC<DrawerProps> = ({
@@ -18,6 +20,8 @@ export const Drawer: React.FC<DrawerProps> = ({
   subtitle,
   children,
   maxWidth = 'max-w-2xl sm:max-w-3xl lg:max-w-4xl xl:max-w-5xl',
+  headerRight,
+  bodyClassName,
 }) => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -57,25 +61,28 @@ export const Drawer: React.FC<DrawerProps> = ({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-slate-200/80 bg-slate-50/90 shrink-0">
-          <div className="min-w-0 pr-3">
+          <div className="min-w-0 pr-3 flex-1">
             <h3 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight truncate">
               {title}
             </h3>
             {subtitle && (
-              <p className="text-xs text-slate-500 mt-0.5 truncate">{subtitle}</p>
+              <div className="text-xs text-slate-500 mt-0.5 truncate">{subtitle}</div>
             )}
           </div>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-200/60 transition-colors shrink-0 cursor-pointer"
-            aria-label="Close drawer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {headerRight}
+            <button
+              onClick={onClose}
+              className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-200/60 transition-colors shrink-0 cursor-pointer"
+              aria-label="Close drawer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Scrollable Body */}
-        <div className="p-5 sm:p-6 overflow-y-auto flex-1 min-h-0">
+        <div className={`p-5 sm:p-6 overflow-y-auto flex-1 min-h-0 ${bodyClassName || ''}`}>
           {children}
         </div>
       </div>

@@ -1571,7 +1571,7 @@ export const InvoicesView: React.FC = () => {
         {/* 1. HEADER (Left: invoice details, Right: logo) - Fully Responsive */}
         <div className="flex flex-row justify-between items-start pb-4 border-b-2 border-slate-900 gap-3 sm:gap-4">
           <div className="space-y-1 sm:space-y-1.5 flex-1 min-w-0">
-            <h2 className="text-xl sm:text-3xl font-black text-slate-900 tracking-tight uppercase leading-tight">
+            <h2 className="text-xl sm:text-3xl font-black text-blue-600 tracking-tight uppercase leading-tight">
               INVOICE
             </h2>
             <ul className="space-y-1 sm:space-y-0.5 text-[11px] sm:text-[11.5px] text-slate-700">
@@ -1585,12 +1585,12 @@ export const InvoicesView: React.FC = () => {
               </li>
               <li className="flex flex-col sm:flex-row sm:items-baseline">
                 <span className="font-semibold text-slate-500 sm:min-w-[105px]">Due Date:</span>
-                <span className="font-mono font-bold text-[#ea580c]">{inv.dueDate}</span>
+                <span className="font-mono font-bold text-slate-900">{inv.dueDate}</span>
               </li>
               {inv.proposalRef && (
                 <li className="flex flex-col sm:flex-row sm:items-baseline">
                   <span className="font-semibold text-slate-500 sm:min-w-[105px]">Proposal Ref:</span>
-                  <span className="font-mono font-bold text-purple-700">{inv.proposalRef}</span>
+                  <span className="font-mono font-bold text-slate-900">{inv.proposalRef}</span>
                 </li>
               )}
               {inv.poNumber && (
@@ -1615,8 +1615,8 @@ export const InvoicesView: React.FC = () => {
         {/* 2. BILLED BY & BILLED TO */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
           {/* BILLED BY (SUPPLIER) */}
-          <div className="bg-[#f8fafc] border border-slate-200 rounded-lg p-3 sm:p-3.5 space-y-1">
-            <div className="text-[10px] font-extrabold text-slate-500 uppercase tracking-[0.8px] pb-1 mb-1.5 border-b border-dashed border-slate-300">
+          <div className="border border-slate-200 rounded-lg p-3 sm:p-3.5 space-y-1">
+            <div className="text-[10px] font-extrabold text-blue-600 uppercase tracking-[0.8px] pb-1 mb-1.5">
               BILLED BY (SUPPLIER)
             </div>
             <div className="text-[13px] font-extrabold text-slate-900">{companyName}</div>
@@ -1633,8 +1633,8 @@ export const InvoicesView: React.FC = () => {
           </div>
 
           {/* BILLED TO (BUYER) */}
-          <div className="bg-[#f8fafc] border border-slate-200 rounded-lg p-3 sm:p-3.5 space-y-1">
-            <div className="text-[10px] font-extrabold text-slate-500 uppercase tracking-[0.8px] pb-1 mb-1.5 border-b border-dashed border-slate-300">
+          <div className="border border-slate-200 rounded-lg p-3 sm:p-3.5 space-y-1">
+            <div className="text-[10px] font-extrabold text-blue-600 uppercase tracking-[0.8px] pb-1 mb-1.5">
               BILLED TO (BUYER)
             </div>
             <div className="text-[13px] font-extrabold text-slate-900">{inv.customerName}</div>
@@ -1662,21 +1662,21 @@ export const InvoicesView: React.FC = () => {
 
         {/* 3. PRODUCTS DETAILS (TAX INVOICE SCHEDULE) */}
         <div>
-          <div className="text-[11px] font-extrabold text-slate-900 uppercase tracking-[0.8px] mb-2">
+          <div className="text-[11px] font-extrabold text-blue-600 uppercase tracking-[0.8px] mb-2">
             PRODUCTS DETAILS (TAX INVOICE SCHEDULE)
           </div>
           <div className="border border-slate-300 rounded-lg overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs min-w-[580px]">
               <thead>
-                <tr className="bg-[#0f172a] text-white text-[9.5px] font-bold uppercase tracking-[0.6px]">
-                  <th className="py-2 px-2.5 text-center w-10">#</th>
-                  <th className="py-2 px-2.5">Description &amp; Model</th>
-                  <th className="py-2 px-2.5 text-center w-16">HSN/SAC</th>
-                  <th className="py-2 px-2.5 text-center w-12">Qty</th>
-                  <th className="py-2 px-2.5 text-right w-24">Unit Rate</th>
-                  <th className="py-2 px-2.5 text-center w-16">Disc (%)</th>
-                  <th className="py-2 px-2.5 text-right w-24">Taxable</th>
-                  <th className="py-2 px-2.5 text-right w-28">Total (₹)</th>
+                <tr className="border-b-2 border-slate-300 text-slate-800 text-[9.5px] font-bold uppercase tracking-[0.6px] bg-transparent">
+                  <th className="py-2.5 px-2.5 text-center w-10">#</th>
+                  <th className="py-2.5 px-2.5">Description &amp; Model</th>
+                  <th className="py-2.5 px-2.5 text-center w-16">HSN/SAC</th>
+                  <th className="py-2.5 px-2.5 text-center w-12">Qty</th>
+                  <th className="py-2.5 px-2.5 text-right w-24">Unit Rate</th>
+                  <th className="py-2.5 px-2.5 text-center w-16">Disc (%)</th>
+                  <th className="py-2.5 px-2.5 text-right w-24">Taxable</th>
+                  <th className="py-2.5 px-2.5 text-right w-28">Total (₹)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
@@ -1726,13 +1726,13 @@ export const InvoicesView: React.FC = () => {
                         <td className="py-2 px-2.5 text-right font-mono text-slate-700">
                           {formatCurrency(rate)}
                         </td>
-                        <td className="py-2 px-2.5 text-center font-mono font-semibold text-emerald-600">
+                        <td className="py-2 px-2.5 text-center font-mono font-semibold text-slate-700">
                           {discPct ? `${discPct}%` : '—'}
                         </td>
                         <td className="py-2 px-2.5 text-right font-mono text-slate-700">
                           {formatCurrency(itemSubtotal)}
                           {discAmt > 0 && (
-                            <span className="block text-[9px] text-emerald-600">
+                            <span className="block text-[9px] text-slate-500">
                               -₹{discAmt.toLocaleString('en-IN')}
                             </span>
                           )}
@@ -1762,7 +1762,7 @@ export const InvoicesView: React.FC = () => {
               {discountAmount > 0 && (
                 <tr>
                   <td className="py-1 px-2 text-slate-600 text-left">Commercial Discount:</td>
-                  <td className="py-1 px-2 text-right font-mono font-semibold text-emerald-600">
+                  <td className="py-1 px-2 text-right font-mono font-semibold text-slate-800">
                     -{formatCurrency(discountAmount)}
                   </td>
                 </tr>
@@ -1783,7 +1783,7 @@ export const InvoicesView: React.FC = () => {
                 <td className="py-1 px-2 text-slate-600 text-left">Freight &amp; Assembly Fee:</td>
                 <td className="py-1 px-2 text-right font-mono font-semibold text-slate-800">
                   {deliveryFee === 0 ? (
-                    <span className="text-emerald-600 font-bold">FREE</span>
+                    <span className="text-slate-800 font-bold">FREE</span>
                   ) : (
                     formatCurrency(deliveryFee)
                   )}
@@ -1793,19 +1793,19 @@ export const InvoicesView: React.FC = () => {
                 <td className="py-2 px-2 text-slate-900 font-extrabold uppercase tracking-wide text-xs">
                   Total Amount:
                 </td>
-                <td className="py-2 px-2 text-right font-mono font-black text-sm text-[#ea580c]">
+                <td className="py-2 px-2 text-right font-mono font-black text-sm text-blue-600">
                   {formatCurrency(total)}
                 </td>
               </tr>
               <tr>
-                <td className="py-1 px-2 text-emerald-700 font-semibold text-left">Amount Paid:</td>
-                <td className="py-1 px-2 text-right font-mono font-semibold text-emerald-700">
+                <td className="py-1 px-2 text-slate-700 font-semibold text-left">Amount Paid:</td>
+                <td className="py-1 px-2 text-right font-mono font-semibold text-slate-800">
                   {formatCurrency(amountPaid)}
                 </td>
               </tr>
               <tr>
-                <td className="py-1 px-2 text-amber-800 font-bold text-left">Balance Due:</td>
-                <td className="py-1 px-2 text-right font-mono font-extrabold text-amber-800">
+                <td className="py-1 px-2 text-slate-900 font-bold text-left">Balance Due:</td>
+                <td className="py-1 px-2 text-right font-mono font-extrabold text-blue-600">
                   {formatCurrency(balanceDue)}
                 </td>
               </tr>
@@ -1816,13 +1816,13 @@ export const InvoicesView: React.FC = () => {
         {/* 4. BANK DETAILS & AUTHORIZED SIGNATORY */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3.5 pt-2 items-stretch">
           {/* Bank Details Box (7 cols) */}
-          <div className="md:col-span-7 bg-[#f8fafc] border-[1.5px] border-slate-300 rounded-lg p-3 sm:p-3.5 space-y-2 flex flex-col justify-between">
+          <div className="md:col-span-7 border-[1.5px] border-slate-300 rounded-lg p-3 sm:p-3.5 space-y-2 flex flex-col justify-between">
             <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-              <span className="text-[10.5px] font-extrabold text-slate-900 uppercase tracking-[0.8px] flex items-center gap-1.5">
+              <span className="text-[10.5px] font-extrabold text-blue-600 uppercase tracking-[0.8px] flex items-center gap-1.5">
                 <Landmark className="w-3.5 h-3.5 text-blue-600" />
                 BANK DETAILS FOR PAYMENT
               </span>
-              <span className="bg-[#0f172a] text-white text-[8.5px] font-bold px-1.5 py-0.5 rounded tracking-wide">
+              <span className="bg-slate-900 text-white text-[8.5px] font-bold px-1.5 py-0.5 rounded tracking-wide">
                 RTGS / NEFT / IMPS
               </span>
             </div>
@@ -1872,7 +1872,7 @@ export const InvoicesView: React.FC = () => {
                   <span className="text-[9px] font-semibold text-slate-500 uppercase tracking-wider block">
                     UPI ID
                   </span>
-                  <span className="text-[11px] font-bold text-purple-700 font-mono block">
+                  <span className="text-[11px] font-bold text-slate-900 font-mono block">
                     {activeBank.upiId}
                   </span>
                 </div>
@@ -1881,8 +1881,8 @@ export const InvoicesView: React.FC = () => {
           </div>
 
           {/* Authorized Signatory (5 cols) */}
-          <div className="md:col-span-5 border border-dashed border-slate-300 rounded-lg p-3 sm:p-3.5 bg-white flex flex-col justify-between text-right h-full">
-            <div className="text-[10px] font-bold text-slate-700 uppercase tracking-wider">
+          <div className="md:col-span-5 border border-slate-300 rounded-lg p-3 sm:p-3.5 bg-white flex flex-col justify-between text-right h-full">
+            <div className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">
               For {companyName}
             </div>
             <div className="flex-1 flex items-center justify-end my-1 min-h-12">
@@ -1938,13 +1938,13 @@ export const InvoicesView: React.FC = () => {
               className="p-2 sm:p-2.5 rounded-xl bg-slate-100 hover:bg-slate-200/90 text-slate-700 hover:text-slate-900 border border-slate-200/80 transition cursor-pointer flex items-center gap-1.5 sm:gap-2 text-xs font-semibold shrink-0 active:scale-95"
               title="Return to Invoices List"
             >
-              <ArrowLeft className="w-4 h-4 text-orange-600" />
+              <ArrowLeft className="w-4 h-4 text-blue-600" />
               <span className="hidden xs:inline">Back to Invoices</span>
             </button>
             <div className="h-6 w-px bg-slate-200 hidden xs:block" />
             <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-              <span className="inline-flex items-center gap-1 sm:gap-1.5 px-2.5 py-1 rounded-lg bg-orange-50 border border-orange-200 text-orange-800 text-xs font-mono font-bold">
-                <Receipt className="w-3.5 h-3.5 text-orange-600" />
+              <span className="inline-flex items-center gap-1 sm:gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 text-xs font-mono font-bold">
+                <Receipt className="w-3.5 h-3.5 text-blue-600" />
                 <span>{selectedInvoice.invoiceNumber}</span>
               </span>
 
@@ -2222,7 +2222,7 @@ export const InvoicesView: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse min-w-[1000px]">
               <thead>
-                <tr className="bg-slate-50/80 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                <tr className="border-b border-slate-200 text-[11px] font-semibold text-slate-600 uppercase tracking-wider bg-transparent">
                   <th className="py-2.5 px-3.5">Invoice # & Date</th>
                   <th className="py-2.5 px-3.5">Client & Organization</th>
                   <th className="py-2.5 px-3.5">Scope & Products</th>
