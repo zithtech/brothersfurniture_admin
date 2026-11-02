@@ -55,12 +55,27 @@ export const InvoicesView: React.FC = () => {
     settings,
     confirm,
     setCurrentView,
+    activeInvoiceIdForView,
+    setActiveInvoiceIdForView,
   } = useAdmin()
 
   const [viewMode, setViewMode] = useState<'table' | 'card'>('table')
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus | 'all'>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null)
+
+  // Auto-open specific invoice when requested from Customer page
+  useEffect(() => {
+    if (activeInvoiceIdForView) {
+      const target = invoices.find(
+        (i) => i.id === activeInvoiceIdForView || i.invoiceNumber === activeInvoiceIdForView
+      )
+      if (target) {
+        setSelectedInvoice(target)
+      }
+      setActiveInvoiceIdForView(null)
+    }
+  }, [activeInvoiceIdForView, invoices, setActiveInvoiceIdForView])
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null)

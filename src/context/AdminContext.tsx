@@ -134,6 +134,9 @@ interface AdminContextType {
 
   // Invoices & Billing
   invoices: Invoice[]
+  activeInvoiceIdForView: string | null
+  setActiveInvoiceIdForView: (id: string | null) => void
+  openInvoiceInView: (invoiceId: string) => void
   addInvoice: (invoice: Omit<Invoice, 'id' | 'invoiceNumber' | 'createdAt'>) => Promise<Invoice>
   updateInvoice: (id: string, partial: Partial<Invoice>) => void
   deleteInvoice: (id: string) => void
@@ -216,6 +219,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [orders, setOrders] = useState<Order[]>(() => loadStored('orders', initialOrders))
   const [proposals, setProposals] = useState<Proposal[]>(() => loadStored<Proposal[]>('proposals', []))
   const [invoices, setInvoices] = useState<Invoice[]>(() => loadStored<Invoice[]>('invoices', []))
+  const [activeInvoiceIdForView, setActiveInvoiceIdForView] = useState<string | null>(null)
   const [clients, setClients] = useState<ClientPartner[]>(() => loadStored('clients', initialClients))
   const [testimonials, setTestimonials] = useState<TestimonialReview[]>(() => loadStored('testimonials', initialTestimonials))
   const [settings, setSettings] = useState<CompanySettings>(() => loadStored('settings', initialSettings))
@@ -1493,6 +1497,11 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }
 
+  const openInvoiceInView = (invoiceId: string) => {
+    setActiveInvoiceIdForView(invoiceId)
+    setCurrentView('invoices')
+  }
+
   // Clients Operations
   const addClient = async (c: Omit<ClientPartner, 'id'>) => {
     const id = c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || `client-${Date.now()}`
@@ -1777,6 +1786,9 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         convertProposalToInvoice,
         generateProposalPdf,
         invoices,
+        activeInvoiceIdForView,
+        setActiveInvoiceIdForView,
+        openInvoiceInView,
         addInvoice,
         updateInvoice,
         deleteInvoice,
