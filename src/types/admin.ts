@@ -330,6 +330,7 @@ export interface Order {
   createdAt: string
   targetDeliveryDate?: string
   notes?: string
+  pdfUrl?: string
 }
 
 export type ProposalStatus = 'draft' | 'sent' | 'under_review' | 'approved' | 'rejected' | 'converted'

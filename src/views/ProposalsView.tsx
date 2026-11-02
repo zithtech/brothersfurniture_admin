@@ -34,8 +34,10 @@ import {
 import { Drawer } from '../components/common/Drawer'
 import { SearchableSelect, type SelectOption } from '../components/common/SearchableSelect'
 import { StatusDropdown } from '../components/common/StatusDropdown'
+import { WhatsAppShareModal } from '../components/common/WhatsAppShareModal'
 import { useAdmin } from '../context/AdminContext'
 import { customerApi } from '../services/customerApi'
+import { formatProposalWhatsAppMessage } from '../utils/whatsapp'
 import type { Product, Proposal, ProposalItem, ProposalStatus } from '../types/admin'
 import type { Customer } from '../types/customer'
 
@@ -69,6 +71,7 @@ export const ProposalsView: React.FC = () => {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false)
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null)
   const [actionMenuCoords, setActionMenuCoords] = useState<{ top: number; left: number } | null>(null)
+  const [whatsappShareProposal, setWhatsappShareProposal] = useState<Proposal | null>(null)
 
   // Close 3-dot action dropdown when clicking outside, scrolling, or pressing Escape
   useEffect(() => {
@@ -816,6 +819,48 @@ export const ProposalsView: React.FC = () => {
     setTimeout(() => setCopiedPropId(null), 2000)
   }
 
+  const renderWhatsAppShareModal = () =>
+    whatsappShareProposal && (
+      <WhatsAppShareModal
+        isOpen={true}
+        onClose={() => setWhatsappShareProposal(null)}
+        recipientName={
+          whatsappShareProposal.preparedFor ||
+          whatsappShareProposal.customerName ||
+          whatsappShareProposal.companyName ||
+          'Valued Client'
+        }
+        initialPhone={
+          whatsappShareProposal.clientPhone ||
+          whatsappShareProposal.phone ||
+          ''
+        }
+        initialMessage={formatProposalWhatsAppMessage(whatsappShareProposal, {
+          companyName: settings.name || 'Brothers Furniture',
+        })}
+        documentNumber={whatsappShareProposal.proposalNumber}
+        documentType="proposal"
+        totalAmount={whatsappShareProposal.total}
+        pdfUrl={whatsappShareProposal.pdfUrl}
+        onGeneratePdf={async () => {
+          const url = await generateProposalPdf(
+            whatsappShareProposal.id,
+            whatsappShareProposal
+          )
+          if (url) {
+            setWhatsappShareProposal((prev) =>
+              prev ? { ...prev, pdfUrl: url } : null
+            )
+            if (selectedProposal?.id === whatsappShareProposal.id) {
+              setSelectedProposal((prev) =>
+                prev ? { ...prev, pdfUrl: url } : null
+              )
+            }
+          }
+          return url
+        }}
+      />
+    )
 
   if (selectedProposal) {
     return (
@@ -922,20 +967,15 @@ export const ProposalsView: React.FC = () => {
             </button>
 
             {/* WhatsApp Share */}
-            <a
-              href={`https://wa.me/?text=${encodeURIComponent(
-                `Brothers Furniture (Ambattur Industrial Estate) Commercial Fit-out Proposal Ref *${selectedProposal.proposalNumber}* for *₹${selectedProposal.total.toLocaleString(
-                  'en-IN'
-                )}*.\n\nProject Scope: ${selectedProposal.title}\nLine Items: ${selectedProposal.items.length} products (${selectedProposal.items.reduce((s, i) => s + i.quantity, 0)} units).\n\nValidity: ${selectedProposal.validUntil}${selectedProposal.pdfUrl ? `\n\nView Proposal PDF: ${selectedProposal.pdfUrl}` : ''}`
-              )}`}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              type="button"
+              onClick={() => setWhatsappShareProposal(selectedProposal)}
               className="flex-1 sm:flex-initial justify-center px-3 sm:px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
-              title="Share via WhatsApp"
+              title="Share Proposal via WhatsApp"
             >
-              <Send className="w-3.5 h-3.5 text-slate-600" />
+              <Send className="w-3.5 h-3.5 text-emerald-600" />
               <span>WhatsApp</span>
-            </a>
+            </button>
           </div>
         </div>
 
@@ -976,6 +1016,7 @@ export const ProposalsView: React.FC = () => {
             </button>
           </div>
         )}
+        {renderWhatsAppShareModal()}
       </div>
     )
   }
@@ -1510,25 +1551,18 @@ export const ProposalsView: React.FC = () => {
                 </button>
               )}
 
-              <a
-                href={`https://wa.me/${(activeActionProp.clientPhone || activeActionProp.phone || '').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                  `Greetings ${activeActionProp.preparedFor || activeActionProp.customerName},\n\nBrothers Furniture (Ambattur Industrial Estate) has prepared your commercial fit-out proposal ref *${activeActionProp.proposalNumber}* for *₹${activeActionProp.total.toLocaleString(
-                    'en-IN'
-                  )}*.\n\nItems included:\n${activeActionProp.items
-                    .map((it) => `• ${it.name} (Qty: ${it.quantity})`)
-                    .join('\n')}\n\nOur executive will coordinate with you for layout validation.`
-                )}`}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
                 onClick={() => {
                   setOpenActionMenuId(null)
                   setActionMenuCoords(null)
+                  setWhatsappShareProposal(activeActionProp)
                 }}
                 className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center gap-2.5 transition-colors cursor-pointer"
               >
                 <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
                 <span>Share via WhatsApp</span>
-              </a>
+              </button>
             </div>
 
             <div className="py-1">
@@ -2172,6 +2206,9 @@ export const ProposalsView: React.FC = () => {
           </div>
         </form>
       </Drawer>
+
+      {/* WhatsApp Share & Review Modal */}
+      {renderWhatsAppShareModal()}
     </div>
   )
 }

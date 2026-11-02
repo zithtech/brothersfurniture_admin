@@ -33,8 +33,10 @@ import {
 import { Drawer } from '../components/common/Drawer'
 import { Modal } from '../components/common/Modal'
 import { SearchableSelect, type SelectOption } from '../components/common/SearchableSelect'
+import { WhatsAppShareModal } from '../components/common/WhatsAppShareModal'
 import { useAdmin } from '../context/AdminContext'
 import { customerApi } from '../services/customerApi'
+import { formatInvoiceWhatsAppMessage } from '../utils/whatsapp'
 import type { Invoice, InvoiceItem, InvoiceStatus, PaymentMode, Product } from '../types/admin'
 import type { Customer } from '../types/customer'
 import logoImg from '../assets/logo.png'
@@ -67,6 +69,7 @@ export const InvoicesView: React.FC = () => {
   const [copiedInvId, setCopiedInvId] = useState<string | null>(null)
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null)
   const [actionMenuCoords, setActionMenuCoords] = useState<{ top: number; left: number } | null>(null)
+  const [whatsappShareInvoice, setWhatsappShareInvoice] = useState<Invoice | null>(null)
 
   const activeActionInv = useMemo(
     () => invoices.find((i) => i.id === openActionMenuId),
@@ -1516,6 +1519,44 @@ export const InvoicesView: React.FC = () => {
       </Modal>
     )
 
+  const renderWhatsAppShareModal = () =>
+    whatsappShareInvoice && (
+      <WhatsAppShareModal
+        isOpen={true}
+        onClose={() => setWhatsappShareInvoice(null)}
+        recipientName={
+          whatsappShareInvoice.customerName ||
+          whatsappShareInvoice.companyName ||
+          'Valued Customer'
+        }
+        initialPhone={whatsappShareInvoice.phone || ''}
+        initialMessage={formatInvoiceWhatsAppMessage(whatsappShareInvoice, {
+          companyName: settings.name || 'Brothers Furniture',
+        })}
+        documentNumber={whatsappShareInvoice.invoiceNumber}
+        documentType="invoice"
+        totalAmount={whatsappShareInvoice.total}
+        pdfUrl={whatsappShareInvoice.pdfUrl}
+        onGeneratePdf={async () => {
+          const url = await generateInvoicePdf(
+            whatsappShareInvoice.id,
+            whatsappShareInvoice
+          )
+          if (url) {
+            setWhatsappShareInvoice((prev) =>
+              prev ? { ...prev, pdfUrl: url } : null
+            )
+            if (selectedInvoice?.id === whatsappShareInvoice.id) {
+              setSelectedInvoice((prev) =>
+                prev ? { ...prev, pdfUrl: url } : null
+              )
+            }
+          }
+          return url
+        }}
+      />
+    )
+
   const renderInvoiceDocument = (inv: Invoice) => {
     const bankAccounts = settings.bankAccounts || []
     const activeBank =
@@ -2005,24 +2046,15 @@ export const InvoicesView: React.FC = () => {
             </button>
 
             {/* WHATSAPP SHARE BUTTON */}
-            <a
-              href={`https://wa.me/${selectedInvoice.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                `Dear ${selectedInvoice.customerName},\nBrothers Furniture official Tax Invoice *${selectedInvoice.invoiceNumber}* for *₹${selectedInvoice.total.toLocaleString(
-                  'en-IN'
-                )}* is attached.\n\nPaid: ₹${(selectedInvoice.amountPaid || 0).toLocaleString(
-                  'en-IN'
-                )}\nBalance: ₹${(selectedInvoice.balanceDue || 0).toLocaleString(
-                  'en-IN'
-                )}\n\nThank you for your business.`
-              )}`}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              type="button"
+              onClick={() => setWhatsappShareInvoice(selectedInvoice)}
               className="flex-1 sm:flex-initial justify-center px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
-              title="Share via WhatsApp"
+              title="Share Tax Invoice via WhatsApp"
             >
-              <Send className="w-3.5 h-3.5 text-slate-600" />
+              <Send className="w-3.5 h-3.5 text-emerald-600" />
               <span>WhatsApp</span>
-            </a>
+            </button>
           </div>
         </div>
 
@@ -2032,6 +2064,7 @@ export const InvoicesView: React.FC = () => {
         {/* Modals */}
         {renderInvoiceBuilderModal()}
         {renderPaymentModal()}
+        {renderWhatsAppShareModal()}
       </div>
     )
   }
@@ -2602,27 +2635,18 @@ export const InvoicesView: React.FC = () => {
                 </button>
               )}
 
-              <a
-                href={`https://wa.me/${activeActionInv.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                  `Greetings ${activeActionInv.customerName},\n\nBrothers Furniture official tax invoice ref *${activeActionInv.invoiceNumber}* for *₹${activeActionInv.total.toLocaleString(
-                    'en-IN'
-                  )}* is ready.\n\nAmount Paid: ₹${(activeActionInv.amountPaid || 0).toLocaleString(
-                    'en-IN'
-                  )}\nBalance Due: ₹${(activeActionInv.balanceDue || 0).toLocaleString(
-                    'en-IN'
-                  )}\n\nThank you for choosing Brothers Furniture.`
-                )}`}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
                 onClick={() => {
                   setOpenActionMenuId(null)
                   setActionMenuCoords(null)
+                  setWhatsappShareInvoice(activeActionInv)
                 }}
                 className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center gap-2.5 transition-colors cursor-pointer"
               >
                 <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
                 <span>Share on WhatsApp</span>
-              </a>
+              </button>
             </div>
 
             <div className="py-1">
@@ -2647,6 +2671,9 @@ export const InvoicesView: React.FC = () => {
 
       {/* 6. RECORD PAYMENT MODAL */}
       {renderPaymentModal()}
+
+      {/* 7. WHATSAPP SHARE & REVIEW MODAL */}
+      {renderWhatsAppShareModal()}
     </div>
   )
 }

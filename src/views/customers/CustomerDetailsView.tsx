@@ -30,6 +30,7 @@ import { Modal } from '../../components/common/Modal'
 import { SearchableSelect, type SelectOption } from '../../components/common/SearchableSelect'
 import { useAdmin } from '../../context/AdminContext'
 import { customerApi } from '../../services/customerApi'
+import { formatCustomerGreetingMessage, getWhatsAppClickToChatUrl, normalizeWhatsAppPhone } from '../../utils/whatsapp'
 import { DESIGNATION_OPTIONS, DEPARTMENT_OPTIONS } from './CustomerDrawer'
 import type {
   AddressType,
@@ -166,11 +167,15 @@ export const CustomerDetailsView: React.FC<CustomerDetailsViewProps> = ({
     }, 2000)
   }
 
-  // WhatsApp quick launcher
-  const getWhatsAppUrl = (phone: string) => {
-    const digits = phone.replace(/\D/g, '')
-    const cleanNumber = digits.length === 10 ? `91${digits}` : digits
-    return `https://wa.me/${cleanNumber}`
+  // WhatsApp quick launcher with prefilled greeting & international country code
+  const getWhatsAppUrl = (phone: string, contactName?: string) => {
+    const normalized = normalizeWhatsAppPhone(phone)
+    const name = contactName || customer?.primaryContact?.name || customer?.companyName || 'Valued Customer'
+    const message = formatCustomerGreetingMessage(name)
+    if (!normalized) {
+      return `https://wa.me/?text=${encodeURIComponent(message)}`
+    }
+    return getWhatsAppClickToChatUrl(normalized, message)
   }
 
   // Status Change Handler
@@ -674,7 +679,7 @@ export const CustomerDetailsView: React.FC<CustomerDetailsViewProps> = ({
                     <Phone className="w-2.5 h-2.5" />
                   </a>
                   <a
-                    href={getWhatsAppUrl(primaryContact.phone)}
+                    href={getWhatsAppUrl(primaryContact.phone, primaryContact.name)}
                     target="_blank"
                     rel="noreferrer"
                     className="p-0.5 text-slate-400 hover:text-emerald-600 hover:bg-slate-200/60 rounded"
@@ -997,7 +1002,7 @@ export const CustomerDetailsView: React.FC<CustomerDetailsViewProps> = ({
                           <span>{primaryContact.phone}</span>
                         </a>
                         <a
-                          href={getWhatsAppUrl(primaryContact.phone)}
+                          href={getWhatsAppUrl(primaryContact.phone, primaryContact.name)}
                           target="_blank"
                           rel="noreferrer"
                           className="p-0.5 hover:bg-slate-200 text-emerald-600 rounded"
@@ -1172,7 +1177,7 @@ export const CustomerDetailsView: React.FC<CustomerDetailsViewProps> = ({
                       <span>{con.phone}</span>
                     </a>
                     <a
-                      href={getWhatsAppUrl(con.phone)}
+                      href={getWhatsAppUrl(con.phone, con.name)}
                       target="_blank"
                       rel="noreferrer"
                       className="p-0.5 text-emerald-600 hover:bg-emerald-50 rounded"
