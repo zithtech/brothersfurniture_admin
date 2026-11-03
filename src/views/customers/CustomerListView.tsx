@@ -12,7 +12,9 @@ import {
   Filter,
   Grid,
   List,
+  Mail,
   MapPin,
+  MessageCircle,
   Phone,
   Plus,
   RefreshCw,
@@ -25,6 +27,8 @@ import {
 import { useAdmin } from '../../context/AdminContext'
 import { SearchableSelect, type SelectOption } from '../../components/common/SearchableSelect'
 import { customerApi } from '../../services/customerApi'
+import { buildGmailComposeUrl, formatCustomerIntroEmail } from '../../utils/email'
+import { formatCustomerGreetingMessage, getWhatsAppClickToChatUrl, normalizeWhatsAppPhone } from '../../utils/whatsapp'
 import type {
   CompanyCategory,
   CompanySize,
@@ -635,14 +639,47 @@ export const CustomerListView: React.FC<CustomerListViewProps> = ({
                       </p>
                     </div>
                     {contact?.phone && (
-                      <a
-                        href={`tel:${contact.phone}`}
-                        className="p-1.5 text-slate-400 hover:text-orange-600 hover:bg-white rounded-lg transition"
-                        title={`Call ${contact.phone}`}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <Phone className="w-3.5 h-3.5" />
-                      </a>
+                      <div className="flex items-center gap-1">
+                        <a
+                          href={`tel:${contact.phone}`}
+                          className="p-1.5 text-slate-400 hover:text-orange-600 hover:bg-white rounded-lg transition"
+                          title={`Call ${contact.phone}`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                        </a>
+                        {normalizeWhatsAppPhone(contact.phone) && (
+                          <a
+                            href={getWhatsAppClickToChatUrl(
+                              normalizeWhatsAppPhone(contact.phone)!,
+                              formatCustomerGreetingMessage(contact.name || c.companyName)
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1.5 text-emerald-600 hover:text-emerald-700 hover:bg-white rounded-lg transition"
+                            title={`Chat on WhatsApp with ${contact.name || c.companyName}`}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <MessageCircle className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                        {(contact?.email || c.companyEmail) && (
+                          <a
+                            href={buildGmailComposeUrl(
+                              contact?.email || c.companyEmail!,
+                              formatCustomerIntroEmail(c.companyName, { contactName: contact?.name }).subject,
+                              formatCustomerIntroEmail(c.companyName, { contactName: contact?.name }).body
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-white rounded-lg transition"
+                            title={`Send Email via Gmail to ${contact?.email || c.companyEmail}`}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Mail className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                      </div>
                     )}
                   </div>
 
@@ -739,7 +776,40 @@ export const CustomerListView: React.FC<CustomerListViewProps> = ({
                     </td>
                     <td className="p-3.5">
                       <p className="font-semibold text-slate-800">{c.primaryContact?.name || '—'}</p>
-                      <p className="text-[11px] text-slate-400">{c.primaryContact?.phone || ''}</p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-[11px] text-slate-400">{c.primaryContact?.phone || c.companyPhone || ''}</p>
+                        {(c.primaryContact?.phone || c.companyPhone) && normalizeWhatsAppPhone(c.primaryContact?.phone || c.companyPhone) && (
+                          <a
+                            href={getWhatsAppClickToChatUrl(
+                              normalizeWhatsAppPhone(c.primaryContact?.phone || c.companyPhone)!,
+                              formatCustomerGreetingMessage(c.primaryContact?.name || c.companyName)
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-0.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded transition"
+                            title={`Chat on WhatsApp with ${c.companyName}`}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <MessageCircle className="w-3 h-3" />
+                          </a>
+                        )}
+                        {(c.primaryContact?.email || c.companyEmail) && (
+                          <a
+                            href={buildGmailComposeUrl(
+                              c.primaryContact?.email || c.companyEmail!,
+                              formatCustomerIntroEmail(c.companyName, { contactName: c.primaryContact?.name }).subject,
+                              formatCustomerIntroEmail(c.companyName, { contactName: c.primaryContact?.name }).body
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-0.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded transition"
+                            title={`Send Email via Gmail to ${c.companyName}`}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Mail className="w-3 h-3" />
+                          </a>
+                        )}
+                      </div>
                     </td>
                     <td className="p-3.5">
                       <p className="font-medium text-slate-800">{c.primaryAddress?.city || '—'}</p>

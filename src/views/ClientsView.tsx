@@ -1,18 +1,23 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import {
   AlertCircle,
   Building2,
   Check,
   Edit2,
+  ExternalLink,
   Grid,
+  Image as ImageIcon,
   List,
+  Loader2,
   Plus,
   RotateCcw,
   Star,
   Trash2,
+  Upload,
 } from 'lucide-react'
 import { Modal } from '../components/common/Modal'
 import { useAdmin } from '../context/AdminContext'
+import { api } from '../services/api'
 import type { ClientPartner } from '../types/admin'
 
 export const ClientsView: React.FC = () => {
@@ -54,18 +59,93 @@ export const ClientsView: React.FC = () => {
 
   const [formData, setFormData] = useState({
     name: '',
-    logo: '/clients/pvr-cinemas.webp',
+    logo: '',
     sector: 'Technology',
     featured: true,
   })
 
+  // Logo upload state
+  const logoFileInputRef = useRef<HTMLInputElement>(null)
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false)
+  const [logoUploadError, setLogoUploadError] = useState<string | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const [showAdvancedUrl, setShowAdvancedUrl] = useState(false)
+
+  const handleFileProcess = async (file: File) => {
+    if (file.size > 5 * 1024 * 1024) {
+      setLogoUploadError('Logo file size must be less than 5 MB.')
+      if (logoFileInputRef.current) logoFileInputRef.current.value = ''
+      return
+    }
+
+    if (!['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'].includes(file.type)) {
+      setLogoUploadError('Please select a valid PNG, SVG, WEBP, or JPEG image file.')
+      if (logoFileInputRef.current) logoFileInputRef.current.value = ''
+      return
+    }
+
+    try {
+      setIsUploadingLogo(true)
+      setLogoUploadError(null)
+      const res = await api.uploadImage(file, 'corporate-clients')
+      if (res.data?.url) {
+        setFormData((prev) => ({ ...prev, logo: res.data.url }))
+      }
+    } catch (err: any) {
+      console.error('Corporate client logo upload failed:', err)
+      // Resilient fallback: read as data URL if offline/backend proxy is unreachable
+      try {
+        const reader = new FileReader()
+        reader.onloadend = () => {
+          if (typeof reader.result === 'string') {
+            setFormData((prev) => ({ ...prev, logo: reader.result as string }))
+          }
+        }
+        reader.readAsDataURL(file)
+      } catch {
+        setLogoUploadError(err.message || 'Logo upload failed. Please try again.')
+      }
+    } finally {
+      setIsUploadingLogo(false)
+      if (logoFileInputRef.current) logoFileInputRef.current.value = ''
+    }
+  }
+
+  const handleLogoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      handleFileProcess(file)
+    }
+  }
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    setIsDragging(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) {
+      handleFileProcess(file)
+    }
+  }
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    setIsDragging(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    setIsDragging(false)
+  }
+
   const handleOpenAdd = () => {
     setFormData({
       name: '',
-      logo: '/clients/pvr-cinemas.webp',
+      logo: '',
       sector: 'Technology',
       featured: true,
     })
+    setLogoUploadError(null)
+    setShowAdvancedUrl(false)
     setIsAddModalOpen(true)
   }
 
@@ -77,11 +157,17 @@ export const ClientsView: React.FC = () => {
       sector: c.sector,
       featured: c.featured,
     })
+    setLogoUploadError(null)
+    setShowAdvancedUrl(false)
   }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!formData.name.trim()) return
+    if (!formData.logo.trim()) {
+      setLogoUploadError('Please upload or select a logo for the client partner.')
+      return
+    }
 
     if (editingClient) {
       updateClient(editingClient.id, formData)
@@ -424,6 +510,7 @@ export const ClientsView: React.FC = () => {
         }}
         title={editingClient ? `Edit ${editingClient.name}` : 'Add Corporate Client Partner'}
         subtitle="Appears in Landing Page Client Marquee"
+        maxWidth="max-w-xl"
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -448,71 +535,287 @@ export const ClientsView: React.FC = () => {
               <input
                 required
                 type="text"
+                list="client-sector-options"
                 value={formData.sector}
                 onChange={(e) => setFormData({ ...formData, sector: e.target.value })}
                 placeholder="e.g. Technology, Healthcare, Banking"
                 className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/10 transition"
               />
+              <datalist id="client-sector-options">
+                <option value="Technology" />
+                <option value="Healthcare" />
+                <option value="Banking & Finance" />
+                <option value="Entertainment" />
+                <option value="Manufacturing" />
+                <option value="Infrastructure" />
+                <option value="Engineering" />
+                <option value="Media" />
+                <option value="Retail" />
+                <option value="Education" />
+                <option value="Services" />
+              </datalist>
             </div>
-            <div>
-              <label className="text-xs font-semibold text-slate-700 block mb-1">
-                Logo Asset Path <span className="text-orange-500">*</span>
+
+            <div className="flex flex-col justify-end">
+              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-slate-800 font-semibold block">Landing Marquee</span>
+                  <span className="text-[10px] text-slate-500">Show on homepage marquee</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={formData.featured}
+                  onChange={(e) => setFormData({ ...formData, featured: e.target.checked })}
+                  className="rounded accent-orange-500 w-4 h-4 cursor-pointer"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Corporate Client Logo Upload Section */}
+          <div className="space-y-2 pt-1 border-t border-slate-100">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-700 block">
+                Corporate Client Logo <span className="text-orange-500">*</span>
               </label>
-              <input
-                required
-                type="text"
-                value={formData.logo}
-                onChange={(e) => setFormData({ ...formData, logo: e.target.value })}
-                placeholder="/clients/pvr-cinemas.webp"
-                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/10 transition"
-              />
+              {formData.logo ? (
+                <span className="text-[10.5px] text-emerald-600 font-medium flex items-center gap-1">
+                  <Check className="w-3 h-3 text-emerald-600" /> Logo Attached
+                </span>
+              ) : (
+                <span className="text-[10.5px] text-slate-400">
+                  PNG / SVG recommended
+                </span>
+              )}
             </div>
-          </div>
 
-          {/* Quick presets */}
-          <div>
-            <span className="text-[11px] text-slate-500 block mb-1 font-medium">Select Existing Logo Asset:</span>
-            <div className="flex flex-wrap gap-1.5">
-              {logoPresets.map((preset) => (
-                <button
-                  key={preset.label}
-                  type="button"
-                  onClick={() => setFormData({ ...formData, logo: preset.path, name: preset.label })}
-                  className="text-[10.5px] px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200/80 transition cursor-pointer"
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
-            <span className="text-xs text-slate-700 font-medium">Show in Landing Page Marquee</span>
+            {/* Hidden native file input */}
             <input
-              type="checkbox"
-              checked={formData.featured}
-              onChange={(e) => setFormData({ ...formData, featured: e.target.checked })}
-              className="rounded accent-orange-500 w-4 h-4 cursor-pointer"
+              ref={logoFileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+              className="hidden"
+              onChange={handleLogoFileUpload}
             />
+
+            {/* Error Message */}
+            {logoUploadError && (
+              <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 flex items-center justify-between animate-fade-in">
+                <span>{logoUploadError}</span>
+                <button
+                  type="button"
+                  onClick={() => setLogoUploadError(null)}
+                  className="text-red-500 hover:text-red-700 font-bold ml-2 cursor-pointer"
+                >
+                  ×
+                </button>
+              </div>
+            )}
+
+            {formData.logo ? (
+              /* Logo Preview State */
+              <div className="border border-slate-200 rounded-xl p-3 bg-slate-50/70 space-y-2.5">
+                <div className="flex flex-col sm:flex-row items-center gap-3.5">
+                  {/* Checkerboard Preview Frame */}
+                  <div className="w-36 h-20 rounded-lg bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:10px_10px] bg-slate-100 border border-slate-200 flex items-center justify-center p-2 relative overflow-hidden shrink-0 shadow-inner">
+                    <img
+                      src={formData.logo}
+                      alt={formData.name || 'Client Logo'}
+                      className="max-h-full max-w-full object-contain filter drop-shadow-xs"
+                      onError={(e) => {
+                        ;(e.target as HTMLElement).style.opacity = '0.3'
+                      }}
+                    />
+                    {isUploadingLogo && (
+                      <div className="absolute inset-0 bg-white/85 backdrop-blur-2xs flex items-center justify-center">
+                        <Loader2 className="w-5 h-5 text-orange-500 animate-spin" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Logo Details & Actions */}
+                  <div className="flex-1 min-w-0 space-y-1 w-full text-center sm:text-left">
+                    <div className="flex items-center justify-center sm:justify-start gap-1.5 flex-wrap">
+                      <span className="text-xs font-bold text-slate-800 truncate max-w-[200px]">
+                        {formData.name || 'Client Logo'}
+                      </span>
+                      {formData.logo.startsWith('http') ? (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                          Cloudflare R2 / Web
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                          Local Asset
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-500 font-mono truncate" title={formData.logo}>
+                      {formData.logo}
+                    </p>
+
+                    <div className="flex items-center justify-center sm:justify-start gap-2 pt-1 flex-wrap">
+                      <button
+                        type="button"
+                        disabled={isUploadingLogo}
+                        onClick={() => logoFileInputRef.current?.click()}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg bg-orange-600 hover:bg-orange-700 text-white shadow-xs transition cursor-pointer disabled:opacity-50"
+                      >
+                        {isUploadingLogo ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Upload className="w-3 h-3" />
+                        )}
+                        <span>{isUploadingLogo ? 'Uploading...' : 'Upload New Logo'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, logo: '' })}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-200 bg-white hover:bg-red-50 text-slate-600 hover:text-red-600 transition cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Remove</span>
+                      </button>
+
+                      {formData.logo.startsWith('http') && (
+                        <a
+                          href={formData.logo}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-800 transition px-1.5 py-1"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>View Original</span>
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Dropzone / Upload State */
+              <div
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                onClick={() => !isUploadingLogo && logoFileInputRef.current?.click()}
+                className={`border-2 border-dashed rounded-xl p-5 text-center transition-all cursor-pointer ${
+                  isDragging
+                    ? 'border-orange-500 bg-orange-50/70 scale-[0.99]'
+                    : 'border-slate-300 hover:border-orange-400 bg-slate-50/50 hover:bg-orange-50/20'
+                }`}
+              >
+                {isUploadingLogo ? (
+                  <div className="py-2 flex flex-col items-center justify-center gap-1.5">
+                    <Loader2 className="w-6 h-6 text-orange-500 animate-spin" />
+                    <span className="text-xs font-bold text-slate-800">Uploading logo to Cloudflare R2...</span>
+                    <span className="text-[11px] text-slate-500">Please wait while the image is securely stored.</span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center gap-1.5">
+                    <div className="w-9 h-9 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center shadow-2xs">
+                      <Upload className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-800">
+                        Click to upload client logo or drag & drop here
+                      </p>
+                      <p className="text-[10.5px] text-slate-500 mt-0.5">
+                        PNG, SVG, WEBP, or JPEG (transparent background recommended, max 5 MB)
+                      </p>
+                    </div>
+                    <span className="inline-flex items-center gap-1 px-3 py-1 text-[11px] font-semibold text-orange-600 bg-orange-50 border border-orange-200/80 rounded-lg mt-0.5">
+                      <ImageIcon className="w-3 h-3" /> Select Image File
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Presets & Manual Path toggle */}
+            <div className="pt-1.5 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-[11px] text-slate-500 font-medium">Or choose from existing brand presets:</span>
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedUrl(!showAdvancedUrl)}
+                  className="text-[11px] text-orange-600 hover:text-orange-700 font-medium cursor-pointer"
+                >
+                  {showAdvancedUrl ? 'Hide manual path' : 'Enter URL / path manually'}
+                </button>
+              </div>
+
+              {/* Quick Preset Buttons */}
+              <div className="flex flex-wrap gap-1.5">
+                {logoPresets.map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => {
+                      setFormData({
+                        ...formData,
+                        logo: preset.path,
+                        name: formData.name ? formData.name : preset.label,
+                      })
+                      setLogoUploadError(null)
+                    }}
+                    className={`text-[10.5px] px-2 py-0.5 rounded-md border transition cursor-pointer ${
+                      formData.logo === preset.path
+                        ? 'bg-orange-500 text-white border-orange-600 font-semibold shadow-2xs'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200/80'
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Collapsible Manual URL input */}
+              {showAdvancedUrl && (
+                <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1 animate-fade-in">
+                  <label className="text-[10.5px] font-semibold text-slate-600 uppercase tracking-wider block">
+                    Custom Logo URL or Asset Path:
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.logo}
+                    onChange={(e) => setFormData({ ...formData, logo: e.target.value })}
+                    placeholder="/clients/your-brand.webp or https://..."
+                    className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/20"
+                  />
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="pt-3 border-t border-slate-200 flex justify-end gap-2.5">
             <button
               type="button"
+              disabled={isUploadingLogo}
               onClick={() => {
                 setIsAddModalOpen(false)
                 setEditingClient(null)
               }}
-              className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition cursor-pointer"
+              className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition cursor-pointer disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-1.5 rounded-lg bg-[#F97316] hover:bg-[#EA580C] text-white text-xs font-semibold shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+              disabled={isUploadingLogo}
+              className="px-4 py-1.5 rounded-lg bg-[#F97316] hover:bg-[#EA580C] text-white text-xs font-semibold shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
-              <Check className="w-3.5 h-3.5" />
-              <span>{editingClient ? 'Save Partner' : 'Add Partner'}</span>
+              {isUploadingLogo ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Uploading Logo...</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-3.5 h-3.5" />
+                  <span>{editingClient ? 'Save Partner' : 'Add Partner'}</span>
+                </>
+              )}
             </button>
           </div>
         </form>

@@ -2,12 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   AlertCircle,
+  ArrowLeft,
   Building2,
   Check,
   CheckCircle2,
   Copy,
   Download,
-  ExternalLink,
   Eye,
   FileEdit,
   FileSpreadsheet,
@@ -16,6 +16,7 @@ import {
   Layers,
   List,
   Loader2,
+  Mail,
   MapPin,
   MessageCircle,
   MoreVertical,
@@ -32,10 +33,14 @@ import {
   User,
 } from 'lucide-react'
 import { Drawer } from '../components/common/Drawer'
+import { GmailShareModal } from '../components/common/GmailShareModal'
 import { SearchableSelect, type SelectOption } from '../components/common/SearchableSelect'
 import { StatusDropdown } from '../components/common/StatusDropdown'
+import { WhatsAppShareModal } from '../components/common/WhatsAppShareModal'
 import { useAdmin } from '../context/AdminContext'
 import { customerApi } from '../services/customerApi'
+import { formatProposalEmail } from '../utils/email'
+import { formatProposalWhatsAppMessage } from '../utils/whatsapp'
 import type { Product, Proposal, ProposalItem, ProposalStatus } from '../types/admin'
 import type { Customer } from '../types/customer'
 
@@ -69,7 +74,8 @@ export const ProposalsView: React.FC = () => {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false)
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null)
   const [actionMenuCoords, setActionMenuCoords] = useState<{ top: number; left: number } | null>(null)
-  const [drawerTab, setDrawerTab] = useState<'pdf' | 'details'>('pdf')
+  const [whatsappShareProposal, setWhatsappShareProposal] = useState<Proposal | null>(null)
+  const [gmailShareProposal, setGmailShareProposal] = useState<Proposal | null>(null)
 
   // Close 3-dot action dropdown when clicking outside, scrolling, or pressing Escape
   useEffect(() => {
@@ -817,8 +823,257 @@ export const ProposalsView: React.FC = () => {
     setTimeout(() => setCopiedPropId(null), 2000)
   }
 
+  const renderWhatsAppShareModal = () =>
+    whatsappShareProposal && (
+      <WhatsAppShareModal
+        isOpen={true}
+        onClose={() => setWhatsappShareProposal(null)}
+        recipientName={
+          whatsappShareProposal.preparedFor ||
+          whatsappShareProposal.customerName ||
+          whatsappShareProposal.companyName ||
+          'Valued Client'
+        }
+        initialPhone={
+          whatsappShareProposal.clientPhone ||
+          whatsappShareProposal.phone ||
+          ''
+        }
+        initialMessage={formatProposalWhatsAppMessage(whatsappShareProposal, {
+          companyName: settings.name || 'Brothers Furniture',
+        })}
+        documentNumber={whatsappShareProposal.proposalNumber}
+        documentType="proposal"
+        totalAmount={whatsappShareProposal.total}
+        pdfUrl={whatsappShareProposal.pdfUrl}
+        onGeneratePdf={async () => {
+          const url = await generateProposalPdf(
+            whatsappShareProposal.id,
+            whatsappShareProposal
+          )
+          if (url) {
+            setWhatsappShareProposal((prev) =>
+              prev ? { ...prev, pdfUrl: url } : null
+            )
+            if (selectedProposal?.id === whatsappShareProposal.id) {
+              setSelectedProposal((prev) =>
+                prev ? { ...prev, pdfUrl: url } : null
+              )
+            }
+          }
+          return url
+        }}
+      />
+    )
 
+  const renderGmailShareModal = () =>
+    gmailShareProposal && (
+      <GmailShareModal
+        isOpen={true}
+        onClose={() => setGmailShareProposal(null)}
+        recipientName={
+          gmailShareProposal.preparedFor ||
+          gmailShareProposal.customerName ||
+          gmailShareProposal.companyName ||
+          'Valued Client'
+        }
+        initialEmail={gmailShareProposal.email || ''}
+        initialSubject={formatProposalEmail(gmailShareProposal, { companyName: settings.name }).subject}
+        initialBody={formatProposalEmail(gmailShareProposal, { companyName: settings.name }).body}
+        documentNumber={gmailShareProposal.proposalNumber}
+        documentType="proposal"
+        totalAmount={gmailShareProposal.total}
+        pdfUrl={gmailShareProposal.pdfUrl}
+        onGeneratePdf={async () => {
+          const url = await generateProposalPdf(
+            gmailShareProposal.id,
+            gmailShareProposal
+          )
+          if (url) {
+            setGmailShareProposal((prev) =>
+              prev ? { ...prev, pdfUrl: url } : null
+            )
+            if (selectedProposal?.id === gmailShareProposal.id) {
+              setSelectedProposal((prev) =>
+                prev ? { ...prev, pdfUrl: url } : null
+              )
+            }
+          }
+          return url
+        }}
+      />
+    )
 
+  if (selectedProposal) {
+    return (
+      <div className="space-y-4">
+        {/* Dedicated PDF Top Navigation & Action Bar (Clean White Theme & Fully Responsive) */}
+        <div className="bg-white text-slate-900 rounded-2xl p-3 sm:p-5 shadow-xs border border-slate-200/90 flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 print:hidden">
+          {/* Left: Back button + Title & Status */}
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+            <button
+              onClick={() => setSelectedProposal(null)}
+              className="p-2 sm:p-2.5 rounded-xl bg-slate-100 hover:bg-slate-200/90 text-slate-700 hover:text-slate-900 border border-slate-200/80 transition cursor-pointer flex items-center gap-1.5 sm:gap-2 text-xs font-semibold shrink-0 active:scale-95"
+              title="Return to Proposals List"
+            >
+              <ArrowLeft className="w-4 h-4 text-orange-600" />
+              <span className="hidden xs:inline">Back</span>
+            </button>
+            <div className="h-6 w-px bg-slate-200 hidden xs:block" />
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-mono font-bold">
+                <FileText className="w-3.5 h-3.5 text-rose-600" />
+                <span>{selectedProposal.proposalNumber}</span>
+              </span>
+
+              {/* Enhanced Status Selector */}
+              <StatusDropdown
+                value={selectedProposal.status}
+                size="sm"
+                onChange={(newStatus) => {
+                  updateProposalStatus(selectedProposal.id, newStatus)
+                  setSelectedProposal((prev) => (prev ? { ...prev, status: newStatus } : null))
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Right: Primary Actions (Fully Responsive Toolbar) */}
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap w-full lg:w-auto">
+            {/* DOWNLOAD PDF BUTTON */}
+            <button
+              onClick={() => handleDownloadPdf(selectedProposal)}
+              disabled={isGeneratingPdf}
+              className="flex-1 sm:flex-initial justify-center px-3 sm:px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 disabled:opacity-60 text-slate-700 hover:text-slate-900 border border-slate-200 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
+              title="Download official PDF to device"
+            >
+              {isGeneratingPdf ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-500" />
+                  <span>Preparing...</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Download<span className="hidden sm:inline"> PDF</span></span>
+                </>
+              )}
+            </button>
+
+            {/* REGENERATE PROPOSAL PDF BUTTON */}
+            <button
+              onClick={async () => {
+                const newUrl = await generateProposalPdf(selectedProposal.id, selectedProposal)
+                if (newUrl) {
+                  setSelectedProposal((prev) => (prev ? { ...prev, pdfUrl: newUrl } : null))
+                }
+              }}
+              disabled={isGeneratingPdf}
+              className="flex-1 sm:flex-initial justify-center px-3 sm:px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 disabled:opacity-60 text-slate-700 hover:text-slate-900 border border-slate-200 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
+              title="Regenerate proposal PDF with updated products and specs"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-600" />
+              <span>Regenerate<span className="hidden sm:inline"> PDF</span></span>
+            </button>
+
+            {/* Convert to Invoice Button */}
+            {selectedProposal.status !== 'converted' ? (
+              <button
+                onClick={() => handleConvertProposal(selectedProposal)}
+                className="flex-1 sm:flex-initial justify-center px-3 sm:px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
+              >
+                <Receipt className="w-3.5 h-3.5 text-slate-600" />
+                <span>Convert<span className="hidden sm:inline"> to Invoice</span></span>
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  setSelectedProposal(null)
+                  setCurrentView('invoices')
+                }}
+                className="flex-1 sm:flex-initial justify-center px-3 sm:px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 text-slate-600" />
+                <span>View Invoice</span>
+              </button>
+            )}
+
+            {/* Print / Save PDF Button */}
+            <button
+              onClick={() => window.print()}
+              className="flex-1 sm:flex-initial justify-center px-3 sm:px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 text-xs font-semibold border border-slate-200 transition inline-flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-95"
+              title="Print Document"
+            >
+              <Printer className="w-3.5 h-3.5 text-slate-600" />
+              <span>Print</span>
+            </button>
+
+            {/* WhatsApp Share */}
+            <button
+              type="button"
+              onClick={() => setWhatsappShareProposal(selectedProposal)}
+              className="flex-1 sm:flex-initial justify-center px-3 sm:px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
+              title="Share Proposal via WhatsApp"
+            >
+              <Send className="w-3.5 h-3.5 text-emerald-600" />
+              <span>WhatsApp</span>
+            </button>
+
+            {/* Gmail Share */}
+            <button
+              type="button"
+              onClick={() => setGmailShareProposal(selectedProposal)}
+              className="flex-1 sm:flex-initial justify-center px-3 sm:px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
+              title="Share Proposal via Gmail"
+            >
+              <Mail className="w-3.5 h-3.5 text-rose-500" />
+              <span>Gmail</span>
+            </button>
+          </div>
+        </div>
+
+        {/* PDF VIEWPORT CONTAINER (WHITE THEME - EXACT PDF FEEL) */}
+        {selectedProposal.pdfUrl ? (
+          /* EXACT NATIVE BROWSER PDF VIEWER EMBED IN CLEAN WHITE FRAME */
+          <div className="w-full rounded-2xl overflow-hidden shadow-xs border border-slate-200 bg-white">
+            <iframe
+              src={`${selectedProposal.pdfUrl}#toolbar=1&navpanes=0`}
+              title={`Proposal ${selectedProposal.proposalNumber}`}
+              className="w-full h-[88vh] min-h-[780px] border-0 bg-white"
+            />
+          </div>
+        ) : isGeneratingPdf ? (
+          <div className="w-full rounded-2xl bg-white border border-slate-200 p-12 flex flex-col items-center justify-center text-center shadow-xs min-h-[600px]">
+            <Loader2 className="w-10 h-10 text-orange-600 animate-spin mb-4" />
+            <h3 className="text-xl font-bold text-slate-900 mb-1">Loading Official Proposal PDF...</h3>
+            <p className="text-slate-500 text-xs max-w-md">
+              Compiling pixel-perfect A4 document with high-resolution specifications and chair imagery...
+            </p>
+          </div>
+        ) : (
+          <div className="w-full rounded-2xl bg-white border border-slate-200 p-8 sm:p-14 flex flex-col items-center justify-center text-center shadow-xs min-h-[580px]">
+            <div className="w-16 h-16 rounded-2xl bg-orange-50 border border-orange-200 flex items-center justify-center text-orange-600 mb-4">
+              <FileText className="w-8 h-8 text-orange-500" />
+            </div>
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Official Fit-Out Proposal PDF</h3>
+            <p className="text-slate-500 text-xs sm:text-sm max-w-lg mb-6 leading-relaxed">
+              Click below to stream the official commercial proposal document directly.
+            </p>
+            <button
+              onClick={() => handleGenerateR2Pdf(selectedProposal)}
+              disabled={isGeneratingPdf}
+              className="px-6 py-3 rounded-xl bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-500 hover:to-orange-600 disabled:opacity-60 text-white font-bold text-sm shadow-xs transition flex items-center gap-2 cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>Load Proposal PDF</span>
+            </button>
+          </div>
+        )}
+        {renderWhatsAppShareModal()}
+        {renderGmailShareModal()}
+      </div>
+    )
+  }
 
   const activeActionProp = proposals.find((p) => p.id === openActionMenuId)
 
@@ -985,7 +1240,6 @@ export const ProposalsView: React.FC = () => {
                       className="hover:bg-slate-50/80 transition-colors group cursor-pointer"
                       onClick={() => {
                         setSelectedProposal(prop)
-                        setDrawerTab('pdf')
                       }}
                     >
                       {/* Ref & Date */}
@@ -1169,7 +1423,6 @@ export const ProposalsView: React.FC = () => {
                 key={prop.id}
                 onClick={() => {
                   setSelectedProposal(prop)
-                  setDrawerTab('pdf')
                 }}
                 className="bg-white rounded-xl border border-slate-200/90 p-3 shadow-2xs hover:border-orange-300 hover:shadow-sm transition-all duration-200 flex flex-col justify-between group cursor-pointer"
               >
@@ -1293,7 +1546,6 @@ export const ProposalsView: React.FC = () => {
                   setOpenActionMenuId(null)
                   setActionMenuCoords(null)
                   setSelectedProposal(activeActionProp)
-                  setDrawerTab('pdf')
                 }}
                 className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-orange-50 hover:text-orange-700 flex items-center gap-2.5 transition-colors cursor-pointer"
               >
@@ -1357,25 +1609,31 @@ export const ProposalsView: React.FC = () => {
                 </button>
               )}
 
-              <a
-                href={`https://wa.me/${(activeActionProp.clientPhone || activeActionProp.phone || '').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                  `Greetings ${activeActionProp.preparedFor || activeActionProp.customerName},\n\nBrothers Furniture (Ambattur Industrial Estate) has prepared your commercial fit-out proposal ref *${activeActionProp.proposalNumber}* for *₹${activeActionProp.total.toLocaleString(
-                    'en-IN'
-                  )}*.\n\nItems included:\n${activeActionProp.items
-                    .map((it) => `• ${it.name} (Qty: ${it.quantity})`)
-                    .join('\n')}\n\nOur executive will coordinate with you for layout validation.`
-                )}`}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
                 onClick={() => {
                   setOpenActionMenuId(null)
                   setActionMenuCoords(null)
+                  setWhatsappShareProposal(activeActionProp)
                 }}
                 className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 flex items-center gap-2.5 transition-colors cursor-pointer"
               >
                 <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
                 <span>Share via WhatsApp</span>
-              </a>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenActionMenuId(null)
+                  setActionMenuCoords(null)
+                  setGmailShareProposal(activeActionProp)
+                }}
+                className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-rose-50 hover:text-rose-700 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <Mail className="w-3.5 h-3.5 text-rose-500" />
+                <span>Send via Gmail</span>
+              </button>
             </div>
 
             <div className="py-1">
@@ -2020,382 +2278,11 @@ export const ProposalsView: React.FC = () => {
         </form>
       </Drawer>
 
-      {/* 5. PROPOSAL PREVIEW & DETAILS SLIDE-OVER DRAWER */}
-      {selectedProposal && (
-        <Drawer
-          isOpen={Boolean(selectedProposal)}
-          onClose={() => setSelectedProposal(null)}
-          maxWidth="max-w-3xl lg:max-w-5xl xl:max-w-6xl w-full"
-          title={
-            <div className="flex items-center gap-2 flex-wrap min-w-0">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-mono font-bold shrink-0">
-                <FileText className="w-3.5 h-3.5 text-rose-600" />
-                <span>{selectedProposal.proposalNumber}</span>
-              </span>
-              <span className="font-bold text-slate-900 text-sm sm:text-base truncate">
-                {selectedProposal.title}
-              </span>
-            </div>
-          }
-          subtitle={
-            <div className="flex items-center gap-1.5 text-xs text-slate-500 flex-wrap mt-0.5">
-              <span>
-                Prepared for:{' '}
-                <strong className="text-slate-800 font-semibold">
-                  {selectedProposal.customerName || selectedProposal.preparedFor || 'Valued Client'}
-                </strong>
-              </span>
-              {selectedProposal.companyName && <span>• {selectedProposal.companyName}</span>}
-              <span>
-                • Total:{' '}
-                <strong className="text-slate-900 font-bold">
-                  ₹{selectedProposal.total.toLocaleString('en-IN')}
-                </strong>
-              </span>
-            </div>
-          }
-          headerRight={
-            <div className="flex items-center gap-2">
-              <StatusDropdown
-                value={selectedProposal.status}
-                size="sm"
-                onChange={(newStatus) => {
-                  updateProposalStatus(selectedProposal.id, newStatus)
-                  setSelectedProposal((prev) => (prev ? { ...prev, status: newStatus } : null))
-                }}
-              />
-            </div>
-          }
-        >
-          <div className="space-y-4">
-            {/* Top Toolbar: Switcher & Actions */}
-            <div className="bg-slate-50/90 rounded-2xl p-2.5 sm:p-3 border border-slate-200/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              {/* Tab Switcher */}
-              <div className="flex items-center bg-white p-1 rounded-xl border border-slate-200/90 shadow-2xs self-start sm:self-auto">
-                <button
-                  type="button"
-                  onClick={() => setDrawerTab('pdf')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
-                    drawerTab === 'pdf'
-                      ? 'bg-orange-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                  }`}
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  <span>Official PDF Document</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDrawerTab('details')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
-                    drawerTab === 'details'
-                      ? 'bg-orange-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                  }`}
-                >
-                  <Layers className="w-3.5 h-3.5" />
-                  <span>Line Items & Details</span>
-                </button>
-              </div>
+      {/* WhatsApp Share & Review Modal */}
+      {renderWhatsAppShareModal()}
 
-              {/* Action Buttons Toolbar */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {/* Download PDF */}
-                <button
-                  onClick={() => handleDownloadPdf(selectedProposal)}
-                  disabled={isGeneratingPdf}
-                  className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 disabled:opacity-60 text-slate-700 hover:text-slate-900 border border-slate-200 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
-                  title="Download official PDF to device"
-                >
-                  {isGeneratingPdf ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-500" />
-                  ) : (
-                    <Download className="w-3.5 h-3.5 text-slate-600" />
-                  )}
-                  <span>Download PDF</span>
-                </button>
-
-                {/* Regenerate PDF */}
-                <button
-                  onClick={async () => {
-                    const newUrl = await generateProposalPdf(selectedProposal.id, selectedProposal)
-                    if (newUrl) {
-                      setSelectedProposal((prev) => (prev ? { ...prev, pdfUrl: newUrl } : null))
-                    }
-                  }}
-                  disabled={isGeneratingPdf}
-                  className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 disabled:opacity-60 text-slate-700 hover:text-slate-900 border border-slate-200 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
-                  title="Regenerate proposal PDF"
-                >
-                  <RotateCcw className="w-3.5 h-3.5 text-slate-600" />
-                  <span>Regenerate</span>
-                </button>
-
-                {/* Edit Proposal */}
-                <button
-                  onClick={() => {
-                    const propToEdit = selectedProposal
-                    setSelectedProposal(null)
-                    handleOpenEditProposal(propToEdit)
-                  }}
-                  className="px-3 py-1.5 rounded-xl bg-white hover:bg-orange-50 text-slate-700 hover:text-orange-700 border border-slate-200 hover:border-orange-200 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
-                  title="Edit this proposal"
-                >
-                  <FileEdit className="w-3.5 h-3.5 text-orange-600" />
-                  <span>Edit</span>
-                </button>
-
-                {/* Convert to Invoice */}
-                {selectedProposal.status !== 'converted' ? (
-                  <button
-                    onClick={() => handleConvertProposal(selectedProposal)}
-                    className="px-3 py-1.5 rounded-xl bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200 hover:border-emerald-200 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
-                  >
-                    <Receipt className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Convert to Invoice</span>
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => {
-                      setSelectedProposal(null)
-                      setCurrentView('invoices')
-                    }}
-                    className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>View Invoice</span>
-                  </button>
-                )}
-
-                {/* WhatsApp */}
-                <a
-                  href={`https://wa.me/${(selectedProposal.clientPhone || selectedProposal.phone || '').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                    `Brothers Furniture (Ambattur Industrial Estate) Commercial Fit-out Proposal Ref *${selectedProposal.proposalNumber}* for *₹${selectedProposal.total.toLocaleString(
-                      'en-IN'
-                    )}*.\n\nProject Scope: ${selectedProposal.title}\nLine Items: ${selectedProposal.items.length} products (${selectedProposal.items.reduce((s, i) => s + i.quantity, 0)} units).\n\nValidity: ${selectedProposal.validUntil}${selectedProposal.pdfUrl ? `\n\nView Proposal PDF: ${selectedProposal.pdfUrl}` : ''}`
-                  )}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-xl bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200 hover:border-emerald-200 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
-                  title="Share via WhatsApp"
-                >
-                  <Send className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>WhatsApp</span>
-                </a>
-
-                {/* Print */}
-                <button
-                  onClick={() => {
-                    const iframe = document.getElementById('proposal-view-pdf-iframe') as HTMLIFrameElement
-                    if (iframe && iframe.contentWindow) {
-                      iframe.contentWindow.print()
-                    } else {
-                      window.print()
-                    }
-                  }}
-                  className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 text-xs font-semibold border border-slate-200 transition inline-flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-95"
-                  title="Print Proposal"
-                >
-                  <Printer className="w-3.5 h-3.5 text-slate-600" />
-                  <span>Print</span>
-                </button>
-              </div>
-            </div>
-
-
-            {/* TAB CONTENT 1: PDF Document Viewer */}
-            {drawerTab === 'pdf' && (
-              <div>
-                {selectedProposal.pdfUrl ? (
-                  <div className="w-full rounded-2xl overflow-hidden shadow-xs border border-slate-200 bg-white">
-                    <div className="bg-slate-50 px-3.5 py-2 border-b border-slate-200 flex items-center justify-between text-xs text-slate-500">
-                      <div className="flex items-center gap-2">
-                        <FileText className="w-3.5 h-3.5 text-rose-600" />
-                        <span className="font-semibold text-slate-700">Official Fit-Out Proposal Document</span>
-                      </div>
-                      <a
-                        href={selectedProposal.pdfUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 text-orange-600 hover:text-orange-700 font-semibold transition"
-                      >
-                        <span>Open in new tab</span>
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                    </div>
-                    <iframe
-                      id="proposal-view-pdf-iframe"
-                      src={`${selectedProposal.pdfUrl}#toolbar=1&navpanes=0`}
-                      title={`Proposal ${selectedProposal.proposalNumber}`}
-                      className="w-full h-[70vh] min-h-[580px] border-0 bg-white"
-                    />
-                  </div>
-                ) : isGeneratingPdf ? (
-                  <div className="w-full rounded-2xl bg-white border border-slate-200 p-12 flex flex-col items-center justify-center text-center shadow-xs min-h-[460px]">
-                    <Loader2 className="w-10 h-10 text-orange-600 animate-spin mb-4" />
-                    <h3 className="text-lg font-bold text-slate-900 mb-1">Compiling Official Proposal PDF...</h3>
-                    <p className="text-slate-500 text-xs max-w-md">
-                      Generating high-resolution document with company letterhead, product specifications, and pricing...
-                    </p>
-                  </div>
-                ) : (
-                  <div className="w-full rounded-2xl bg-white border border-slate-200 p-10 flex flex-col items-center justify-center text-center shadow-xs min-h-[460px]">
-                    <div className="w-14 h-14 rounded-2xl bg-orange-50 border border-orange-200 flex items-center justify-center text-orange-600 mb-4">
-                      <FileText className="w-7 h-7 text-orange-500" />
-                    </div>
-                    <h3 className="text-lg font-bold text-slate-900 mb-2">Official Fit-Out Proposal PDF</h3>
-                    <p className="text-slate-500 text-xs max-w-md mb-6 leading-relaxed">
-                      Click below to generate and stream the official commercial proposal document directly.
-                    </p>
-                    <button
-                      onClick={() => handleGenerateR2Pdf(selectedProposal)}
-                      disabled={isGeneratingPdf}
-                      className="px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 disabled:opacity-60 text-white font-bold text-xs shadow-xs transition flex items-center gap-2 cursor-pointer active:scale-95"
-                    >
-                      <Sparkles className="w-4 h-4" />
-                      <span>Generate Proposal PDF</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* TAB CONTENT 2: Itemized Products & Scope Details */}
-            {drawerTab === 'details' && (
-              <div className="space-y-4">
-                {/* Client & Delivery Info Card */}
-                <div className="p-4 bg-slate-50/80 rounded-xl border border-slate-200/80 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <h4 className="font-bold text-slate-900 uppercase tracking-wider text-[11px] mb-2 flex items-center gap-1.5">
-                      <Building2 className="w-3.5 h-3.5 text-orange-500" />
-                      Client & Entity Information
-                    </h4>
-                    <div className="space-y-1.5 text-slate-700">
-                      <div><span className="text-slate-400">Prepared For:</span> <strong>{selectedProposal.preparedFor || selectedProposal.customerName}</strong></div>
-                      {selectedProposal.companyName && <div><span className="text-slate-400">Company:</span> <strong>{selectedProposal.companyName}</strong></div>}
-                      {(selectedProposal.clientPhone || selectedProposal.phone) && <div><span className="text-slate-400">Phone:</span> {selectedProposal.clientPhone || selectedProposal.phone}</div>}
-                      {selectedProposal.email && <div><span className="text-slate-400">Email:</span> {selectedProposal.email}</div>}
-                      {selectedProposal.clientGstin && <div><span className="text-slate-400">GSTIN:</span> <span className="font-mono font-semibold">{selectedProposal.clientGstin}</span></div>}
-                    </div>
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-slate-900 uppercase tracking-wider text-[11px] mb-2 flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5 text-orange-500" />
-                      Delivery & Project Scope
-                    </h4>
-                    <div className="space-y-1.5 text-slate-700">
-                      <div><span className="text-slate-400">Delivery Address:</span> {selectedProposal.clientAddress || selectedProposal.deliveryAddress || 'Ambattur / Chennai Site'}</div>
-                      <div><span className="text-slate-400">Target Delivery Date:</span> {selectedProposal.targetDeliveryDate || 'Within 14 working days'}</div>
-                      <div><span className="text-slate-400">Proposal Validity:</span> {selectedProposal.validUntil || '30 days from proposal date'}</div>
-                      {selectedProposal.projectScope && <div><span className="text-slate-400">Scope Note:</span> {selectedProposal.projectScope}</div>}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Items Table */}
-                <div className="border border-slate-200/90 rounded-xl overflow-hidden bg-white shadow-2xs">
-                  <div className="p-3 bg-slate-50/90 border-b border-slate-200 flex items-center justify-between">
-                    <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                      <Package className="w-3.5 h-3.5 text-orange-500" />
-                      Itemized Scope Products ({selectedProposal.items.length})
-                    </h4>
-                    <span className="text-xs font-bold text-slate-600">
-                      Total Units: {selectedProposal.items.reduce((s, it) => s + (Number(it.quantity) || 0), 0)}
-                    </span>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse text-xs">
-                      <thead>
-                        <tr className="bg-slate-50/60 border-b border-slate-200 text-slate-500 text-[11px] font-semibold">
-                          <th className="py-2.5 px-3">Item & Specifications</th>
-                          <th className="py-2.5 px-3">Category</th>
-                          <th className="py-2.5 px-3 text-center">Qty</th>
-                          <th className="py-2.5 px-3 text-right">Unit Price</th>
-                          <th className="py-2.5 px-3 text-right">Discount</th>
-                          <th className="py-2.5 px-3 text-right">Total</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-slate-700">
-                        {selectedProposal.items.map((item, idx) => (
-                          <tr key={item.id || idx} className="hover:bg-slate-50/60">
-                            <td className="py-2.5 px-3">
-                              <div className="flex items-center gap-2.5">
-                                <img
-                                  src={item.image || '/products/chairs/chair-placeholder.webp'}
-                                  alt={item.name}
-                                  className="w-10 h-10 object-cover rounded-lg border border-slate-200 shrink-0 bg-slate-50"
-                                  onError={(e) => {
-                                    ;(e.target as HTMLImageElement).src = '/products/chairs/chair-placeholder.webp'
-                                  }}
-                                />
-                                <div>
-                                  <span className="font-semibold text-slate-900 block">{item.name}</span>
-                                  {item.sku && <span className="text-[10px] font-mono text-slate-400 block">{item.sku}</span>}
-                                  {item.dimensions && <span className="text-[10px] text-slate-500 block truncate max-w-xs">{item.dimensions}</span>}
-                                </div>
-                              </div>
-                            </td>
-                            <td className="py-2.5 px-3 whitespace-nowrap">
-                              <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-medium">
-                                {item.category || item.type || 'Furniture'}
-                              </span>
-                            </td>
-                            <td className="py-2.5 px-3 text-center font-bold text-slate-900">
-                              {item.quantity}
-                            </td>
-                            <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                              ₹{Number(item.unitPrice || 0).toLocaleString('en-IN')}
-                            </td>
-                            <td className="py-2.5 px-3 text-right whitespace-nowrap text-emerald-600 font-medium">
-                              {item.discountPercent ? `${item.discountPercent}%` : '-'}
-                              {item.discountAmount ? ` (₹${Number(item.discountAmount).toLocaleString('en-IN')})` : ''}
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-bold text-slate-900 whitespace-nowrap">
-                              ₹{Number(item.total || (item.quantity * item.unitPrice)).toLocaleString('en-IN')}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Financial Totals Breakdown Card */}
-                <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-200/80 flex flex-col sm:flex-row justify-between gap-4">
-                  <div className="text-xs text-slate-500 space-y-1 sm:max-w-md">
-                    <h5 className="font-bold text-slate-800 uppercase tracking-wider text-[11px]">Notes & Commercial Terms</h5>
-                    <p>{selectedProposal.notes || 'Standard manufacturing and dispatch terms from Brothers Furniture factory in Ambattur Industrial Estate.'}</p>
-                  </div>
-                  <div className="w-full sm:w-64 space-y-1.5 text-xs text-slate-700 shrink-0">
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Gross Subtotal:</span>
-                      <span className="font-semibold">₹{(selectedProposal.subtotal || selectedProposal.items.reduce((s, it) => s + (it.quantity * it.unitPrice), 0)).toLocaleString('en-IN')}</span>
-                    </div>
-                    {Number(selectedProposal.discountAmount || 0) > 0 && (
-                      <div className="flex justify-between text-emerald-600">
-                        <span>Total Discounts:</span>
-                        <span>-₹{Number(selectedProposal.discountAmount).toLocaleString('en-IN')}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Delivery & Assembly:</span>
-                      <span className="font-semibold">{selectedProposal.deliveryFee ? `₹${selectedProposal.deliveryFee.toLocaleString('en-IN')}` : 'FREE (Threshold met)'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">GST (18%):</span>
-                      <span className="font-semibold">₹{(selectedProposal.taxAmount || 0).toLocaleString('en-IN')}</span>
-                    </div>
-                    <div className="pt-2 border-t border-slate-300 flex justify-between text-sm font-black text-slate-900">
-                      <span>Grand Total:</span>
-                      <span className="text-orange-600">₹{selectedProposal.total.toLocaleString('en-IN')}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </Drawer>
-      )}
+      {/* Gmail Share & Review Modal */}
+      {renderGmailShareModal()}
     </div>
   )
 }

@@ -511,6 +511,8 @@ export const initialTestimonials: TestimonialReview[] = [
 
 export const initialSettings: CompanySettings = {
   name: 'Brothers Furniture',
+  brandTagline: 'Industrial Solutions & Factory Direct Commercial Supply',
+  logoUrl: '',
   addressLines: [
     'Plot No. 24, Sri Moogambigai Nagar,',
     'Kallikuppam, Ambattur,',

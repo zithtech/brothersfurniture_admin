@@ -14,12 +14,14 @@ import {
   WifiOff,
 } from 'lucide-react'
 import logoImg from '../../assets/logo.png'
+import { useAdmin } from '../../context/AdminContext'
 import { useAuth } from '../../context/AuthContext'
 import type { AdminRole } from '../../types/auth'
 import { isNetworkAvailable } from '../../services/authApi'
 
 export const RegisterView: React.FC = () => {
   const { signup, setAuthView } = useAuth()
+  const { settings } = useAdmin()
 
   const [name, setName] = useState('')
   const [nameError, setNameError] = useState<string | null>(null)
@@ -361,8 +363,11 @@ export const RegisterView: React.FC = () => {
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center z-10 px-4">
         <div className="inline-flex items-center justify-center p-3 bg-white/10 backdrop-blur-md rounded-2xl border border-white/15 shadow-xl mb-3">
           <img
-            src={logoImg}
-            alt="Brothers Furniture"
+            src={settings?.logoUrl || logoImg}
+            alt={settings?.name || 'Brothers Furniture'}
+            onError={(e) => {
+              e.currentTarget.src = logoImg
+            }}
             className="h-10 w-auto object-contain filter drop-shadow-md"
           />
         </div>
@@ -370,7 +375,7 @@ export const RegisterView: React.FC = () => {
           Staff Account Registration
         </h1>
         <p className="mt-1 text-xs text-slate-300">
-          Brothers Furniture Corporate Back-Office Security
+          {settings?.name || 'Brothers Furniture'} Corporate Back-Office Security
         </p>
       </div>
 

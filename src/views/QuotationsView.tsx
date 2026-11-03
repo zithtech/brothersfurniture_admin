@@ -8,6 +8,7 @@ import {
   FileText,
   Grid,
   List,
+  Mail,
   MessageCircle,
   Plus,
   Printer,
@@ -16,8 +17,13 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
+import { GmailShareModal } from '../components/common/GmailShareModal'
 import { Modal } from '../components/common/Modal'
+import { WhatsAppShareModal } from '../components/common/WhatsAppShareModal'
+import logoImg from '../assets/logo.png'
 import { useAdmin } from '../context/AdminContext'
+import { formatQuotationEmail } from '../utils/email'
+import { formatQuotationWhatsAppMessage } from '../utils/whatsapp'
 import type { Category, Order, OrderItem, OrderStatus, PaymentStatus } from '../types/admin'
 
 interface NewQuoteItem {
@@ -47,6 +53,8 @@ export const QuotationsView: React.FC = () => {
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState<Order | null>(null)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [copiedQuoteId, setCopiedQuoteId] = useState<string | null>(null)
+  const [whatsappShareOrder, setWhatsappShareOrder] = useState<Order | null>(null)
+  const [gmailShareOrder, setGmailShareOrder] = useState<Order | null>(null)
 
   // Metrics
   const totalQuoteValue = orders.reduce((sum, o) => sum + o.total, 0)
@@ -580,21 +588,24 @@ export const QuotationsView: React.FC = () => {
                           </button>
 
                           {/* Share on WhatsApp */}
-                          <a
-                            href={`https://wa.me/${order.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                              `Hello ${order.customerName},\n\nGreetings from Brothers Furniture (Ambattur Industrial Estate).\nPlease find commercial quotation ref *${order.orderNumber}* for *₹${order.total.toLocaleString(
-                                'en-IN'
-                              )}*.\n\nItems Quoted:\n${order.items
-                                .map((it) => `• ${it.name} (Qty: ${it.quantity})`)
-                                .join('\n')}\n\nDelivery Site: ${order.deliveryAddress}\n\nOur sales representative will connect with you shortly for specifications review.`
-                            )}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            type="button"
+                            onClick={() => setWhatsappShareOrder(order)}
                             className="p-1.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-md transition-colors cursor-pointer inline-flex items-center"
                             title="Share Quote on WhatsApp"
                           >
                             <MessageCircle className="w-3.5 h-3.5" />
-                          </a>
+                          </button>
+
+                          {/* Share via Gmail */}
+                          <button
+                            type="button"
+                            onClick={() => setGmailShareOrder(order)}
+                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-md transition-colors cursor-pointer inline-flex items-center"
+                            title="Share Quote via Gmail"
+                          >
+                            <Mail className="w-3.5 h-3.5" />
+                          </button>
 
                           {/* Delete Quote */}
                           <button
@@ -754,19 +765,22 @@ export const QuotationsView: React.FC = () => {
                   </button>
 
                   <div className="flex items-center gap-1">
-                    <a
-                      href={`https://wa.me/${order.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                        `Hello ${order.customerName},\nBrothers Furniture quotation ref: *${order.orderNumber}* for *₹${order.total.toLocaleString(
-                          'en-IN'
-                        )}* is ready for your review.`
-                      )}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => setWhatsappShareOrder(order)}
                       className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors cursor-pointer"
                       title="Share Quote on WhatsApp"
                     >
                       <MessageCircle className="w-3.5 h-3.5" />
-                    </a>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGmailShareOrder(order)}
+                      className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-md transition-colors cursor-pointer"
+                      title="Share Quote via Gmail"
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                    </button>
                     <button
                       onClick={() => handleDeleteQuote(order)}
                       className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors cursor-pointer"
@@ -1042,20 +1056,30 @@ export const QuotationsView: React.FC = () => {
           <div className="space-y-4 bg-white p-5 sm:p-6 rounded-xl border border-slate-200 text-slate-800">
             {/* Header Letterhead */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b-2 border-slate-900 gap-3">
-              <div>
-                <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                  BROTHERS FURNITURE
-                </h2>
-                <p className="text-xs font-bold text-[#EA580C] uppercase tracking-wider mt-0.5">
-                  Commercial Office Furniture Manufacturers & Turnkey Fit-Outs
-                </p>
-                <p className="text-[11px] text-slate-500 mt-1 max-w-sm leading-relaxed">
-                  {settings.addressLines.join(', ')}
-                </p>
-                <div className="flex items-center gap-3 text-[11px] text-slate-600 font-mono mt-1">
-                  <span>GSTIN: <strong>{settings.gstin}</strong></span>
-                  <span>•</span>
-                  <span>Ph: <strong>{settings.phones[0]?.display || '+91 97907 40027'}</strong></span>
+              <div className="flex items-start gap-3.5">
+                <img
+                  src={settings.logoUrl || logoImg}
+                  alt={settings.name || 'Brothers Furniture'}
+                  onError={(e) => {
+                    e.currentTarget.src = logoImg
+                  }}
+                  className="h-12 w-auto max-w-[130px] object-contain shrink-0 mt-0.5"
+                />
+                <div>
+                  <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                    {(settings.name || 'Brothers Furniture').toUpperCase()}
+                  </h2>
+                  <p className="text-xs font-bold text-[#EA580C] uppercase tracking-wider mt-0.5">
+                    {settings.brandTagline || 'Commercial Office Furniture Manufacturers & Turnkey Fit-Outs'}
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-1 max-w-sm leading-relaxed">
+                    {settings.addressLines.join(', ')}
+                  </p>
+                  <div className="flex items-center gap-3 text-[11px] text-slate-600 font-mono mt-1">
+                    <span>GSTIN: <strong>{settings.gstin}</strong></span>
+                    <span>•</span>
+                    <span>Ph: <strong>{settings.phones[0]?.display || '+91 97907 40027'}</strong></span>
+                  </div>
                 </div>
               </div>
 
@@ -1180,9 +1204,25 @@ export const QuotationsView: React.FC = () => {
                 <span className="font-bold text-slate-900 block text-[10.5px] uppercase tracking-wider">
                   Official Bank Details for RTGS / NEFT:
                 </span>
-                <p>Account Name: <strong>Brothers Furniture Industrial Solutions</strong></p>
-                <p>Bank: <strong>HDFC Bank, Ambattur Industrial Estate Branch</strong></p>
-                <p className="font-mono">A/C No: <strong>50200084920194</strong> | IFSC: <strong>HDFC0001849</strong></p>
+                {(() => {
+                  const defaultBank = settings.bankAccounts?.find((b) => b.isDefault) || settings.bankAccounts?.[0]
+                  if (defaultBank) {
+                    return (
+                      <>
+                        <p>Account Name: <strong>{defaultBank.accountName || settings.name}</strong></p>
+                        <p>Bank: <strong>{defaultBank.bankName}{defaultBank.branch ? `, ${defaultBank.branch}` : ''}</strong></p>
+                        <p className="font-mono">A/C No: <strong>{defaultBank.accountNumber}</strong> | IFSC: <strong>{defaultBank.ifscCode}</strong></p>
+                      </>
+                    )
+                  }
+                  return (
+                    <>
+                      <p>Account Name: <strong>{settings.name || 'Brothers Furniture Industrial Solutions'}</strong></p>
+                      <p>Bank: <strong>HDFC Bank, Ambattur Industrial Estate Branch</strong></p>
+                      <p className="font-mono">A/C No: <strong>50200084920194</strong> | IFSC: <strong>HDFC0001849</strong></p>
+                    </>
+                  )
+                })()}
               </div>
 
               <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/70 space-y-0.5">
@@ -1197,18 +1237,23 @@ export const QuotationsView: React.FC = () => {
 
             {/* Modal Actions */}
             <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 pt-2 border-t border-slate-200">
-              <a
-                href={`https://wa.me/${selectedInvoiceOrder.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
-                  `Dear ${selectedInvoiceOrder.customerName},\nBrothers Furniture official quotation ref *${selectedInvoiceOrder.orderNumber}* for *₹${selectedInvoiceOrder.total.toLocaleString(
-                    'en-IN'
-                  )}* is attached.\n\nThank you for choosing Brothers Furniture Ambattur Plant.`
-                )}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full sm:w-auto px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-2xs transition cursor-pointer inline-flex items-center justify-center gap-1.5"
-              >
-                <Send className="w-3.5 h-3.5" /> Dispatch to WhatsApp
-              </a>
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setWhatsappShareOrder(selectedInvoiceOrder)}
+                  className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-2xs transition cursor-pointer inline-flex items-center justify-center gap-1.5 active:scale-95"
+                >
+                  <Send className="w-3.5 h-3.5" /> Dispatch to WhatsApp
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setGmailShareOrder(selectedInvoiceOrder)}
+                  className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold shadow-2xs transition cursor-pointer inline-flex items-center justify-center gap-1.5 active:scale-95"
+                >
+                  <Mail className="w-3.5 h-3.5" /> Dispatch via Gmail
+                </button>
+              </div>
 
               <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                 <button
@@ -1227,6 +1272,37 @@ export const QuotationsView: React.FC = () => {
             </div>
           </div>
         </Modal>
+      )}
+
+      {/* WhatsApp Share & Review Modal */}
+      {whatsappShareOrder && (
+        <WhatsAppShareModal
+          isOpen={true}
+          onClose={() => setWhatsappShareOrder(null)}
+          recipientName={whatsappShareOrder.customerName || 'Valued Customer'}
+          initialPhone={whatsappShareOrder.phone || ''}
+          initialMessage={formatQuotationWhatsAppMessage(whatsappShareOrder)}
+          documentNumber={whatsappShareOrder.orderNumber}
+          documentType="quotation"
+          totalAmount={whatsappShareOrder.total}
+          pdfUrl={whatsappShareOrder.pdfUrl}
+        />
+      )}
+
+      {/* Gmail Share & Review Modal */}
+      {gmailShareOrder && (
+        <GmailShareModal
+          isOpen={true}
+          onClose={() => setGmailShareOrder(null)}
+          recipientName={gmailShareOrder.customerName || 'Valued Customer'}
+          initialEmail={gmailShareOrder.email || ''}
+          initialSubject={formatQuotationEmail(gmailShareOrder).subject}
+          initialBody={formatQuotationEmail(gmailShareOrder).body}
+          documentNumber={gmailShareOrder.orderNumber}
+          documentType="quotation"
+          totalAmount={gmailShareOrder.total}
+          pdfUrl={gmailShareOrder.pdfUrl}
+        />
       )}
     </div>
   )
