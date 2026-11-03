@@ -12,6 +12,7 @@ import {
   Factory,
   FolderTree,
   Globe,
+  Image as ImageIcon,
   Landmark,
   Loader2,
   Mail,
@@ -23,17 +24,19 @@ import {
   Plus,
   RotateCcw,
   Save,
+  Sparkles,
   Trash2,
   Truck,
   Upload,
 } from 'lucide-react'
+import logoImg from '../assets/logo.png'
 import { AlertBanner } from '../components/common/AlertBanner'
 import { Modal } from '../components/common/Modal'
 import { useAdmin } from '../context/AdminContext'
 import { api } from '../services/api'
 import type { CompanySettings, BankAccount } from '../types/admin'
 
-type SettingsTab = 'all' | 'factory' | 'hotlines' | 'logistics' | 'banner' | 'banking' | 'signature'
+type SettingsTab = 'all' | 'branding' | 'factory' | 'hotlines' | 'logistics' | 'banner' | 'banking' | 'signature'
 
 export const SettingsView: React.FC = () => {
   const { settings, updateSettings, setCurrentView, confirm } = useAdmin()
@@ -48,6 +51,12 @@ export const SettingsView: React.FC = () => {
   const signatureInputRef = useRef<HTMLInputElement>(null)
   const [isUploadingSignature, setIsUploadingSignature] = useState(false)
   const [signatureUploadError, setSignatureUploadError] = useState<string | null>(null)
+
+  // Logo upload state & surface preview
+  const logoInputRef = useRef<HTMLInputElement>(null)
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false)
+  const [logoUploadError, setLogoUploadError] = useState<string | null>(null)
+  const [previewSurface, setPreviewSurface] = useState<'light' | 'dark' | 'checker'>('light')
 
   // Bank details CRUD modal state
   const [bankModalOpen, setBankModalOpen] = useState(false)
@@ -206,6 +215,61 @@ export const SettingsView: React.FC = () => {
     })
     if (ok) {
       const newFormData = { ...formData, signatureUrl: '' }
+      setFormData(newFormData)
+      updateSettings(newFormData)
+      setIsSaved(true)
+      setTimeout(() => setIsSaved(false), 2500)
+    }
+  }
+
+  // Handle Logo Upload to Cloudflare R2
+  const handleLogoFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (file.size > 5 * 1024 * 1024) {
+      setLogoUploadError('Image file size must be less than 5 MB.')
+      if (logoInputRef.current) logoInputRef.current.value = ''
+      return
+    }
+
+    if (!['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'].includes(file.type)) {
+      setLogoUploadError('Please select a valid PNG, SVG, WEBP, or JPEG image file.')
+      if (logoInputRef.current) logoInputRef.current.value = ''
+      return
+    }
+
+    try {
+      setIsUploadingLogo(true)
+      setLogoUploadError(null)
+      const res = await api.uploadImage(file, 'company-logo')
+      if (res.data?.url) {
+        const newFormData = { ...formData, logoUrl: res.data.url }
+        setFormData(newFormData)
+        updateSettings(newFormData)
+        setIsSaved(true)
+        setTimeout(() => setIsSaved(false), 2500)
+      }
+    } catch (err: any) {
+      console.error('Logo upload failed:', err)
+      setLogoUploadError(err.message || 'Logo upload failed. Please try again.')
+    } finally {
+      setIsUploadingLogo(false)
+      if (logoInputRef.current) logoInputRef.current.value = ''
+    }
+  }
+
+  // Restore Default Logo Handler
+  const handleRestoreDefaultLogo = async () => {
+    const ok = await confirm({
+      title: 'Restore Default Factory Logo?',
+      message: 'Are you sure you want to revert to the default Brothers Furniture logo? Any custom uploaded logo URL will be cleared.',
+      confirmText: 'Restore Default',
+      variant: 'warning',
+      icon: 'refresh',
+    })
+    if (ok) {
+      const newFormData = { ...formData, logoUrl: '' }
       setFormData(newFormData)
       updateSettings(newFormData)
       setIsSaved(true)
@@ -383,6 +447,7 @@ export const SettingsView: React.FC = () => {
         <div className="flex items-center gap-1.5">
           {[
             { id: 'all', label: 'All Settings', icon: Building2 },
+            { id: 'branding', label: 'Company Identity & Logo', icon: ImageIcon },
             { id: 'factory', label: 'Factory Plant & Profile', icon: Factory },
             { id: 'hotlines', label: 'Hotlines & WhatsApp', icon: Phone },
             { id: 'logistics', label: 'Delivery & Logistics', icon: Truck },
@@ -418,6 +483,263 @@ export const SettingsView: React.FC = () => {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
+        {/* SECTION 0: Company Identity & Corporate Logo */}
+        {(activeTab === 'all' || activeTab === 'branding') && (
+          <div className="bg-white rounded-xl border border-slate-200/90 p-4 sm:p-5 shadow-xs space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-orange-50 border border-orange-200/60 flex items-center justify-center text-[#EA580C]">
+                  <ImageIcon className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    Company Identity & Corporate Logo
+                    <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-orange-100 text-orange-800">
+                      Brand Assets
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Manage official company branding, display names, and logo shown across invoices, quotations, proposals & sidebar
+                  </p>
+                </div>
+              </div>
+
+              {formData.logoUrl ? (
+                <span className="text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200/60 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                  Custom Logo Active
+                </span>
+              ) : (
+                <span className="text-[11px] font-medium text-slate-600 bg-slate-50 px-2.5 py-1 rounded-full border border-slate-200 flex items-center gap-1">
+                  Default Factory Logo
+                </span>
+              )}
+            </div>
+
+            {/* Grid for Name & Tagline */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="text-[11px] font-semibold text-slate-700 block mb-1 uppercase tracking-wider">
+                  Company Name <span className="text-orange-500">*</span>
+                </label>
+                <input
+                  required
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="Brothers Furniture"
+                  className="w-full bg-slate-50/70 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 font-medium placeholder:text-slate-400 focus:outline-none focus:border-orange-500 focus:bg-white focus:ring-1 focus:ring-orange-500/20 transition"
+                />
+                <span className="text-[10.5px] text-slate-400 mt-1 block">
+                  Primary corporate name used across document headers, emails, WhatsApp messages & sidebar.
+                </span>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-semibold text-slate-700 block mb-1 uppercase tracking-wider">
+                  Brand Tagline / Plant Subtitle
+                </label>
+                <input
+                  type="text"
+                  value={formData.brandTagline || ''}
+                  onChange={(e) => setFormData({ ...formData, brandTagline: e.target.value })}
+                  placeholder="Premium Ergonomic Furniture & Factory Direct Custom Designs"
+                  className="w-full bg-slate-50/70 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-orange-500 focus:bg-white focus:ring-1 focus:ring-orange-500/20 transition"
+                />
+                <span className="text-[10.5px] text-slate-400 mt-1 block">
+                  Displayed beneath the brand name on quotation/proposal covers and client documents.
+                </span>
+              </div>
+            </div>
+
+            {/* Corporate Logo Controls & Multi-Surface Preview */}
+            <div className="p-4 rounded-xl bg-slate-50/70 border border-slate-200/80 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-orange-500" />
+                    Corporate Brand Logo
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    Upload a high-resolution transparent PNG or SVG logo, or enter a hosted asset URL.
+                  </p>
+                </div>
+
+                {/* Multi-Surface Switcher */}
+                <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200 self-start sm:self-auto text-xs">
+                  <span className="text-[10px] font-semibold text-slate-400 px-1 uppercase tracking-wider">Preview Surface:</span>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewSurface('light')}
+                    className={`px-2 py-0.5 rounded text-[11px] font-medium transition cursor-pointer ${
+                      previewSurface === 'light'
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    ☀️ Light (Docs)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewSurface('dark')}
+                    className={`px-2 py-0.5 rounded text-[11px] font-medium transition cursor-pointer ${
+                      previewSurface === 'dark'
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    🌙 Dark (Sidebar)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewSurface('checker')}
+                    className={`px-2 py-0.5 rounded text-[11px] font-medium transition cursor-pointer ${
+                      previewSurface === 'checker'
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    🏁 Transparency
+                  </button>
+                </div>
+              </div>
+
+              {/* Error message */}
+              {logoUploadError && (
+                <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 flex items-center justify-between">
+                  <span>{logoUploadError}</span>
+                  <button
+                    type="button"
+                    onClick={() => setLogoUploadError(null)}
+                    className="text-red-500 hover:text-red-700 font-bold ml-2 cursor-pointer"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+                {/* Surface Preview Box */}
+                <div className="md:col-span-5 flex flex-col items-center justify-center">
+                  <div
+                    className={`w-full h-32 rounded-xl border flex items-center justify-center p-4 transition-all relative overflow-hidden ${
+                      previewSurface === 'light'
+                        ? 'bg-white border-slate-200 shadow-inner'
+                        : previewSurface === 'dark'
+                        ? 'bg-slate-900 border-slate-800'
+                        : 'bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:12px_12px] bg-slate-100 border-slate-300'
+                    }`}
+                  >
+                    <img
+                      src={formData.logoUrl || logoImg}
+                      alt={formData.name || 'Company Logo'}
+                      className="max-h-24 max-w-full object-contain filter drop-shadow-xs transition-transform hover:scale-105"
+                      onError={(e) => {
+                        e.currentTarget.src = logoImg
+                      }}
+                    />
+                    {isUploadingLogo && (
+                      <div className="absolute inset-0 bg-white/80 backdrop-blur-xs flex items-center justify-center gap-2 text-xs font-semibold text-slate-700">
+                        <Loader2 className="w-4 h-4 animate-spin text-orange-500" />
+                        Uploading to Cloudflare R2...
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-slate-400 mt-1.5 text-center">
+                    {previewSurface === 'light' && 'Simulating PDF invoices, quotations & proposal letterheads.'}
+                    {previewSurface === 'dark' && 'Simulating dark navigation sidebar header.'}
+                    {previewSurface === 'checker' && 'Checkerboard grid shows alpha transparency.'}
+                  </span>
+                </div>
+
+                {/* Upload & URL Controls */}
+                <div className="md:col-span-7 space-y-3">
+                  {/* File Input and Action Buttons */}
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                    className="hidden"
+                    onChange={handleLogoFileUpload}
+                  />
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={isUploadingLogo}
+                      onClick={() => logoInputRef.current?.click()}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 text-white font-semibold text-xs shadow-xs transition cursor-pointer disabled:opacity-50"
+                    >
+                      {isUploadingLogo ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Upload className="w-3.5 h-3.5" />
+                      )}
+                      <span>{isUploadingLogo ? 'Uploading...' : 'Upload New Logo'}</span>
+                    </button>
+
+                    {formData.logoUrl && (
+                      <button
+                        type="button"
+                        onClick={handleRestoreDefaultLogo}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs shadow-2xs transition cursor-pointer"
+                        title="Revert back to default Brothers Furniture factory logo"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Restore Factory Logo</span>
+                      </button>
+                    )}
+
+                    {formData.logoUrl && (
+                      <a
+                        href={formData.logoUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-2.5 py-2 text-xs text-slate-500 hover:text-slate-800 transition"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>View Source</span>
+                      </a>
+                    )}
+                  </div>
+
+                  {/* Direct CDN / Hosted URL Input */}
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-600 block mb-1">
+                      Direct Logo Image URL (Cloudflare R2 / CDN):
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="url"
+                        value={formData.logoUrl || ''}
+                        onChange={(e) => setFormData({ ...formData, logoUrl: e.target.value })}
+                        placeholder="https://pub-xxxxxx.r2.dev/company-logo/logo.png (or leave blank for factory logo)"
+                        className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/20 font-mono"
+                      />
+                      {formData.logoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setFormData({ ...formData, logoUrl: '' })}
+                          className="px-2 py-1.5 text-xs text-slate-400 hover:text-red-500 font-medium transition cursor-pointer"
+                          title="Clear URL"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Recommendations */}
+                  <div className="bg-orange-50/50 rounded-lg border border-orange-100 p-2 text-[10.5px] text-slate-600 flex items-start gap-1.5">
+                    <span className="font-bold text-orange-700 shrink-0">Specs:</span>
+                    <span>Transparent PNG or SVG recommended. Ideal aspect ratio 3:1 to 5:1 horizontal banner or 1:1 square. Max 5 MB.</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* SECTION 1: Factory Plant & Registered Office */}
         {(activeTab === 'all' || activeTab === 'factory') && (
           <div className="bg-white rounded-xl border border-slate-200/90 p-4 sm:p-5 shadow-xs space-y-4">

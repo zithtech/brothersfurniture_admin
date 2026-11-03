@@ -19,6 +19,7 @@ import {
   Layers,
   List,
   Loader2,
+  Mail,
   MessageCircle,
   MoreVertical,
   Package,
@@ -31,11 +32,13 @@ import {
   Trash2,
 } from 'lucide-react'
 import { Drawer } from '../components/common/Drawer'
+import { GmailShareModal } from '../components/common/GmailShareModal'
 import { Modal } from '../components/common/Modal'
 import { SearchableSelect, type SelectOption } from '../components/common/SearchableSelect'
 import { WhatsAppShareModal } from '../components/common/WhatsAppShareModal'
 import { useAdmin } from '../context/AdminContext'
 import { customerApi } from '../services/customerApi'
+import { formatInvoiceEmail } from '../utils/email'
 import { formatInvoiceWhatsAppMessage } from '../utils/whatsapp'
 import type { Invoice, InvoiceItem, InvoiceStatus, PaymentMode, Product } from '../types/admin'
 import type { Customer } from '../types/customer'
@@ -70,6 +73,7 @@ export const InvoicesView: React.FC = () => {
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null)
   const [actionMenuCoords, setActionMenuCoords] = useState<{ top: number; left: number } | null>(null)
   const [whatsappShareInvoice, setWhatsappShareInvoice] = useState<Invoice | null>(null)
+  const [gmailShareInvoice, setGmailShareInvoice] = useState<Invoice | null>(null)
 
   const activeActionInv = useMemo(
     () => invoices.find((i) => i.id === openActionMenuId),
@@ -1557,6 +1561,43 @@ export const InvoicesView: React.FC = () => {
       />
     )
 
+  const renderGmailShareModal = () =>
+    gmailShareInvoice && (
+      <GmailShareModal
+        isOpen={true}
+        onClose={() => setGmailShareInvoice(null)}
+        recipientName={
+          gmailShareInvoice.customerName ||
+          gmailShareInvoice.companyName ||
+          'Valued Customer'
+        }
+        initialEmail={gmailShareInvoice.email || ''}
+        initialSubject={formatInvoiceEmail(gmailShareInvoice, { companyName: settings.name }).subject}
+        initialBody={formatInvoiceEmail(gmailShareInvoice, { companyName: settings.name }).body}
+        documentNumber={gmailShareInvoice.invoiceNumber}
+        documentType="invoice"
+        totalAmount={gmailShareInvoice.total}
+        pdfUrl={gmailShareInvoice.pdfUrl}
+        onGeneratePdf={async () => {
+          const url = await generateInvoicePdf(
+            gmailShareInvoice.id,
+            gmailShareInvoice
+          )
+          if (url) {
+            setGmailShareInvoice((prev) =>
+              prev ? { ...prev, pdfUrl: url } : null
+            )
+            if (selectedInvoice?.id === gmailShareInvoice.id) {
+              setSelectedInvoice((prev) =>
+                prev ? { ...prev, pdfUrl: url } : null
+              )
+            }
+          }
+          return url
+        }}
+      />
+    )
+
   const renderInvoiceDocument = (inv: Invoice) => {
     const bankAccounts = settings.bankAccounts || []
     const activeBank =
@@ -1646,8 +1687,11 @@ export const InvoicesView: React.FC = () => {
           {/* Logo on Right */}
           <div className="flex items-start shrink-0 pt-0.5">
             <img
-              src={logoImg}
-              alt="Brothers Furniture"
+              src={settings.logoUrl || logoImg}
+              alt={companyName}
+              onError={(e) => {
+                e.currentTarget.src = logoImg
+              }}
               className="w-24 sm:w-36 md:w-44 max-h-[46px] sm:max-h-[65px] object-contain ml-auto"
             />
           </div>
@@ -2055,6 +2099,17 @@ export const InvoicesView: React.FC = () => {
               <Send className="w-3.5 h-3.5 text-emerald-600" />
               <span>WhatsApp</span>
             </button>
+
+            {/* GMAIL SHARE BUTTON */}
+            <button
+              type="button"
+              onClick={() => setGmailShareInvoice(selectedInvoice)}
+              className="flex-1 sm:flex-initial justify-center px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
+              title="Share Tax Invoice via Gmail"
+            >
+              <Mail className="w-3.5 h-3.5 text-rose-500" />
+              <span>Gmail</span>
+            </button>
           </div>
         </div>
 
@@ -2065,6 +2120,7 @@ export const InvoicesView: React.FC = () => {
         {renderInvoiceBuilderModal()}
         {renderPaymentModal()}
         {renderWhatsAppShareModal()}
+        {renderGmailShareModal()}
       </div>
     )
   }
@@ -2647,6 +2703,19 @@ export const InvoicesView: React.FC = () => {
                 <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
                 <span>Share on WhatsApp</span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenActionMenuId(null)
+                  setActionMenuCoords(null)
+                  setGmailShareInvoice(activeActionInv)
+                }}
+                className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-rose-50 hover:text-rose-700 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <Mail className="w-3.5 h-3.5 text-rose-500" />
+                <span>Send via Gmail</span>
+              </button>
             </div>
 
             <div className="py-1">
@@ -2674,6 +2743,9 @@ export const InvoicesView: React.FC = () => {
 
       {/* 7. WHATSAPP SHARE & REVIEW MODAL */}
       {renderWhatsAppShareModal()}
+
+      {/* 8. GMAIL SHARE & REVIEW MODAL */}
+      {renderGmailShareModal()}
     </div>
   )
 }

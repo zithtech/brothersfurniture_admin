@@ -12,6 +12,7 @@ import {
   Filter,
   Grid,
   List,
+  Mail,
   MapPin,
   MessageCircle,
   Phone,
@@ -26,6 +27,7 @@ import {
 import { useAdmin } from '../../context/AdminContext'
 import { SearchableSelect, type SelectOption } from '../../components/common/SearchableSelect'
 import { customerApi } from '../../services/customerApi'
+import { buildGmailComposeUrl, formatCustomerIntroEmail } from '../../utils/email'
 import { formatCustomerGreetingMessage, getWhatsAppClickToChatUrl, normalizeWhatsAppPhone } from '../../utils/whatsapp'
 import type {
   CompanyCategory,
@@ -661,6 +663,22 @@ export const CustomerListView: React.FC<CustomerListViewProps> = ({
                             <MessageCircle className="w-3.5 h-3.5" />
                           </a>
                         )}
+                        {(contact?.email || c.companyEmail) && (
+                          <a
+                            href={buildGmailComposeUrl(
+                              contact?.email || c.companyEmail!,
+                              formatCustomerIntroEmail(c.companyName, { contactName: contact?.name }).subject,
+                              formatCustomerIntroEmail(c.companyName, { contactName: contact?.name }).body
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-white rounded-lg transition"
+                            title={`Send Email via Gmail to ${contact?.email || c.companyEmail}`}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Mail className="w-3.5 h-3.5" />
+                          </a>
+                        )}
                       </div>
                     )}
                   </div>
@@ -772,6 +790,22 @@ export const CustomerListView: React.FC<CustomerListViewProps> = ({
                             onClick={(e) => e.stopPropagation()}
                           >
                             <MessageCircle className="w-3 h-3" />
+                          </a>
+                        )}
+                        {(c.primaryContact?.email || c.companyEmail) && (
+                          <a
+                            href={buildGmailComposeUrl(
+                              c.primaryContact?.email || c.companyEmail!,
+                              formatCustomerIntroEmail(c.companyName, { contactName: c.primaryContact?.name }).subject,
+                              formatCustomerIntroEmail(c.companyName, { contactName: c.primaryContact?.name }).body
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-0.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded transition"
+                            title={`Send Email via Gmail to ${c.companyName}`}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Mail className="w-3 h-3" />
                           </a>
                         )}
                       </div>

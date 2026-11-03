@@ -30,6 +30,7 @@ import { Modal } from '../../components/common/Modal'
 import { SearchableSelect, type SelectOption } from '../../components/common/SearchableSelect'
 import { useAdmin } from '../../context/AdminContext'
 import { customerApi } from '../../services/customerApi'
+import { buildGmailComposeUrl, formatCustomerIntroEmail } from '../../utils/email'
 import { formatCustomerGreetingMessage, getWhatsAppClickToChatUrl, normalizeWhatsAppPhone } from '../../utils/whatsapp'
 import { DESIGNATION_OPTIONS, DEPARTMENT_OPTIONS } from './CustomerDrawer'
 import type {
@@ -176,6 +177,14 @@ export const CustomerDetailsView: React.FC<CustomerDetailsViewProps> = ({
       return `https://wa.me/?text=${encodeURIComponent(message)}`
     }
     return getWhatsAppClickToChatUrl(normalized, message)
+  }
+
+  // Gmail quick launcher with prefilled intro
+  const getGmailUrl = (email: string, contactName?: string) => {
+    const { subject, body } = formatCustomerIntroEmail(customer?.companyName, {
+      contactName: contactName || customer?.primaryContact?.name,
+    })
+    return buildGmailComposeUrl(email, subject, body)
   }
 
   // Status Change Handler
@@ -559,12 +568,14 @@ export const CustomerDetailsView: React.FC<CustomerDetailsViewProps> = ({
             {/* Direct Communication: Email Company */}
             {customer.companyEmail && (
               <a
-                href={`mailto:${customer.companyEmail}`}
+                href={getGmailUrl(customer.companyEmail)}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/90 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition cursor-pointer"
-                title={`Email ${customer.companyEmail}`}
+                title={`Send Email via Gmail to ${customer.companyEmail}`}
               >
-                <Mail className="w-3 h-3 text-orange-500" />
-                <span className="hidden sm:inline">Email</span>
+                <Mail className="w-3 h-3 text-rose-500" />
+                <span className="hidden sm:inline">Gmail</span>
               </a>
             )}
 
@@ -785,10 +796,13 @@ export const CustomerDetailsView: React.FC<CustomerDetailsViewProps> = ({
                   <div className="flex items-center justify-between">
                     {customer.companyEmail ? (
                       <a
-                        href={`mailto:${customer.companyEmail}`}
-                        className="font-bold text-slate-900 text-xs sm:text-sm hover:text-orange-600 flex items-center gap-1.5 transition truncate max-w-[200px]"
+                        href={getGmailUrl(customer.companyEmail)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-bold text-slate-900 text-xs sm:text-sm hover:text-rose-600 flex items-center gap-1.5 transition truncate max-w-[200px]"
+                        title={`Send Email via Gmail to ${customer.companyEmail}`}
                       >
-                        <Mail className="w-3 h-3 text-orange-500 shrink-0" />
+                        <Mail className="w-3 h-3 text-rose-500 shrink-0" />
                         <span className="truncate">{customer.companyEmail}</span>
                       </a>
                     ) : (
@@ -1017,8 +1031,11 @@ export const CustomerDetailsView: React.FC<CustomerDetailsViewProps> = ({
                       <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50">
                         <span className="text-slate-500 font-medium">Email:</span>
                         <a
-                          href={`mailto:${primaryContact.email}`}
-                          className="font-bold text-slate-900 hover:text-orange-600 truncate max-w-[170px]"
+                          href={getGmailUrl(primaryContact.email, primaryContact.name)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-bold text-slate-900 hover:text-rose-600 truncate max-w-[170px]"
+                          title={`Send Email via Gmail to ${primaryContact.email}`}
                         >
                           {primaryContact.email}
                         </a>
@@ -1191,10 +1208,13 @@ export const CustomerDetailsView: React.FC<CustomerDetailsViewProps> = ({
                   {con.email && (
                     <div className="flex items-center justify-between p-1.5 rounded-lg bg-slate-50/80">
                       <a
-                        href={`mailto:${con.email}`}
-                        className="flex items-center gap-1.5 text-slate-800 hover:text-orange-600 font-bold truncate max-w-[200px]"
+                        href={getGmailUrl(con.email, con.name)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1.5 text-slate-800 hover:text-rose-600 font-bold truncate max-w-[200px]"
+                        title={`Send Email via Gmail to ${con.email}`}
                       >
-                        <Mail className="w-3 h-3 text-orange-500 shrink-0" />
+                        <Mail className="w-3 h-3 text-rose-500 shrink-0" />
                         <span className="truncate">{con.email}</span>
                       </a>
                       <button

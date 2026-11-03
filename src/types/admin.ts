@@ -478,6 +478,8 @@ export interface TestimonialReview {
 
 export interface CompanySettings {
   name: string
+  brandTagline?: string
+  logoUrl?: string
   addressLines: string[]
   phones: { display: string; tel: string }[]
   email: string

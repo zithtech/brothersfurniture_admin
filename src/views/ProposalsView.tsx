@@ -16,6 +16,7 @@ import {
   Layers,
   List,
   Loader2,
+  Mail,
   MapPin,
   MessageCircle,
   MoreVertical,
@@ -32,11 +33,13 @@ import {
   User,
 } from 'lucide-react'
 import { Drawer } from '../components/common/Drawer'
+import { GmailShareModal } from '../components/common/GmailShareModal'
 import { SearchableSelect, type SelectOption } from '../components/common/SearchableSelect'
 import { StatusDropdown } from '../components/common/StatusDropdown'
 import { WhatsAppShareModal } from '../components/common/WhatsAppShareModal'
 import { useAdmin } from '../context/AdminContext'
 import { customerApi } from '../services/customerApi'
+import { formatProposalEmail } from '../utils/email'
 import { formatProposalWhatsAppMessage } from '../utils/whatsapp'
 import type { Product, Proposal, ProposalItem, ProposalStatus } from '../types/admin'
 import type { Customer } from '../types/customer'
@@ -72,6 +75,7 @@ export const ProposalsView: React.FC = () => {
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null)
   const [actionMenuCoords, setActionMenuCoords] = useState<{ top: number; left: number } | null>(null)
   const [whatsappShareProposal, setWhatsappShareProposal] = useState<Proposal | null>(null)
+  const [gmailShareProposal, setGmailShareProposal] = useState<Proposal | null>(null)
 
   // Close 3-dot action dropdown when clicking outside, scrolling, or pressing Escape
   useEffect(() => {
@@ -862,6 +866,44 @@ export const ProposalsView: React.FC = () => {
       />
     )
 
+  const renderGmailShareModal = () =>
+    gmailShareProposal && (
+      <GmailShareModal
+        isOpen={true}
+        onClose={() => setGmailShareProposal(null)}
+        recipientName={
+          gmailShareProposal.preparedFor ||
+          gmailShareProposal.customerName ||
+          gmailShareProposal.companyName ||
+          'Valued Client'
+        }
+        initialEmail={gmailShareProposal.email || ''}
+        initialSubject={formatProposalEmail(gmailShareProposal, { companyName: settings.name }).subject}
+        initialBody={formatProposalEmail(gmailShareProposal, { companyName: settings.name }).body}
+        documentNumber={gmailShareProposal.proposalNumber}
+        documentType="proposal"
+        totalAmount={gmailShareProposal.total}
+        pdfUrl={gmailShareProposal.pdfUrl}
+        onGeneratePdf={async () => {
+          const url = await generateProposalPdf(
+            gmailShareProposal.id,
+            gmailShareProposal
+          )
+          if (url) {
+            setGmailShareProposal((prev) =>
+              prev ? { ...prev, pdfUrl: url } : null
+            )
+            if (selectedProposal?.id === gmailShareProposal.id) {
+              setSelectedProposal((prev) =>
+                prev ? { ...prev, pdfUrl: url } : null
+              )
+            }
+          }
+          return url
+        }}
+      />
+    )
+
   if (selectedProposal) {
     return (
       <div className="space-y-4">
@@ -976,6 +1018,17 @@ export const ProposalsView: React.FC = () => {
               <Send className="w-3.5 h-3.5 text-emerald-600" />
               <span>WhatsApp</span>
             </button>
+
+            {/* Gmail Share */}
+            <button
+              type="button"
+              onClick={() => setGmailShareProposal(selectedProposal)}
+              className="flex-1 sm:flex-initial justify-center px-3 sm:px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 text-xs font-semibold shadow-2xs transition inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
+              title="Share Proposal via Gmail"
+            >
+              <Mail className="w-3.5 h-3.5 text-rose-500" />
+              <span>Gmail</span>
+            </button>
           </div>
         </div>
 
@@ -1017,6 +1070,7 @@ export const ProposalsView: React.FC = () => {
           </div>
         )}
         {renderWhatsAppShareModal()}
+        {renderGmailShareModal()}
       </div>
     )
   }
@@ -1562,6 +1616,19 @@ export const ProposalsView: React.FC = () => {
               >
                 <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
                 <span>Share via WhatsApp</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenActionMenuId(null)
+                  setActionMenuCoords(null)
+                  setGmailShareProposal(activeActionProp)
+                }}
+                className="w-full text-left px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-rose-50 hover:text-rose-700 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <Mail className="w-3.5 h-3.5 text-rose-500" />
+                <span>Send via Gmail</span>
               </button>
             </div>
 
@@ -2209,6 +2276,9 @@ export const ProposalsView: React.FC = () => {
 
       {/* WhatsApp Share & Review Modal */}
       {renderWhatsAppShareModal()}
+
+      {/* Gmail Share & Review Modal */}
+      {renderGmailShareModal()}
     </div>
   )
 }
