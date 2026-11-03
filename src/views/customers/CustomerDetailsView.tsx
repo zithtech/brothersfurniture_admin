@@ -1,17 +1,22 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle,
   ArrowLeft,
   Building2,
   Calendar,
   Check,
+  CheckCircle2,
   Clock,
   Copy,
   CreditCard,
+  DollarSign,
+  Download,
   Edit2,
   ExternalLink,
+  Eye,
   FileText,
   Globe,
+  Loader2,
   Mail,
   MapPin,
   MessageCircle,
@@ -20,6 +25,7 @@ import {
   Package,
   Phone,
   Plus,
+  Receipt,
   Send,
   ShieldCheck,
   Sparkles,
@@ -33,6 +39,7 @@ import { customerApi } from '../../services/customerApi'
 import { buildGmailComposeUrl, formatCustomerIntroEmail } from '../../utils/email'
 import { formatCustomerGreetingMessage, getWhatsAppClickToChatUrl, normalizeWhatsAppPhone } from '../../utils/whatsapp'
 import { DESIGNATION_OPTIONS, DEPARTMENT_OPTIONS } from './CustomerDrawer'
+import type { Invoice, PaymentMode } from '../../types/admin'
 import type {
   AddressType,
   Customer,
@@ -101,12 +108,29 @@ export const CustomerDetailsView: React.FC<CustomerDetailsViewProps> = ({
   onEdit,
   onCustomerUpdated,
 }) => {
-  const { addToast, confirm } = useAdmin()
+  const {
+    addToast,
+    confirm,
+    invoices,
+    recordInvoicePayment,
+    generateInvoicePdf,
+    updateInvoice,
+    setCurrentView,
+    openInvoiceInView,
+  } = useAdmin()
 
   const [customer, setCustomer] = useState<Customer | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'overview' | 'contacts' | 'addresses' | 'orders' | 'activity'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'contacts' | 'addresses' | 'orders' | 'invoices' | 'activity'>('overview')
   const [copiedField, setCopiedField] = useState<string | null>(null)
+
+  // Invoices & Billing states
+  const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null)
+  const [paymentModalInvoice, setPaymentModalInvoice] = useState<Invoice | null>(null)
+  const [paymentAmount, setPaymentAmount] = useState<number>(0)
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('neft_rtgs')
+  const [paymentRef, setPaymentRef] = useState<string>('')
+  const [isRecordingPayment, setIsRecordingPayment] = useState(false)
 
   // Modals for adding contacts / addresses / notes directly from details page
   const [isAddContactModalOpen, setIsAddContactModalOpen] = useState(false)
@@ -139,6 +163,176 @@ export const CustomerDetailsView: React.FC<CustomerDetailsViewProps> = ({
   const [newNoteText, setNewNoteText] = useState('')
   const [newNoteCategory, setNewNoteCategory] = useState<'General' | 'Meeting' | 'Call' | 'Pricing' | 'Requirement'>('General')
   const [isSubmittingNote, setIsSubmittingNote] = useState(false)
+
+  // Filter invoices belonging to this customer
+  const customerInvoices: Invoice[] = useMemo(() => {
+    if (!customer) return []
+
+    // 1. Invoices returned with customer profile from backend
+    const backendInvoices: Invoice[] = Array.isArray(customer.invoices) ? customer.invoices : []
+
+    // 2. Invoices in AdminContext
+    const normalizePhone = (p?: string) => (p || '').replace(/\D/g, '').slice(-10)
+    const custPhone = normalizePhone(customer.companyPhone)
+    const custEmail = (customer.companyEmail || '').trim().toLowerCase()
+    const custName = (customer.companyName || '').trim().toLowerCase()
+    const custGst = (customer.gstNumber || '').trim().toLowerCase()
+
+    const contextMatches = (invoices || []).filter((inv) => {
+      // Check customerId if available
+      if ((inv as any).customerId && (inv as any).customerId === customer.id) return true
+
+      // Check company name
+      const invCompName = (inv.companyName || '').trim().toLowerCase()
+      if (custName && invCompName && (custName === invCompName || invCompName.includes(custName) || custName.includes(invCompName))) {
+        return true
+      }
+
+      // Check customerName on invoice matching company name
+      const invCustName = (inv.customerName || '').trim().toLowerCase()
+      if (custName && invCustName && (custName === invCustName || invCustName.includes(custName))) {
+        return true
+      }
+
+      // Check GST Number
+      const invGst = (inv.clientGstin || '').trim().toLowerCase()
+      if (custGst && invGst && custGst === invGst) return true
+
+      // Check company phone
+      const invPhone = normalizePhone(inv.phone)
+      if (custPhone && invPhone && custPhone === invPhone) return true
+
+      // Check company email
+      const invEmail = (inv.email || '').trim().toLowerCase()
+      if (custEmail && invEmail && custEmail === invEmail) return true
+
+      // Check contacts
+      if (customer.contacts && customer.contacts.length > 0) {
+        for (const ct of customer.contacts) {
+          const ctName = (ct.name || '').trim().toLowerCase()
+          if (ctName && invCustName && (ctName === invCustName || invCustName.includes(ctName))) {
+            return true
+          }
+          const ctPhone = normalizePhone(ct.phone)
+          if (ctPhone && invPhone && ctPhone === invPhone) return true
+          const ctEmail = (ct.email || '').trim().toLowerCase()
+          if (ctEmail && invEmail && ctEmail === invEmail) return true
+        }
+      }
+
+      return false
+    })
+
+    // Merge and deduplicate by id or invoiceNumber
+    const map = new Map<string, Invoice>()
+    for (const inv of [...backendInvoices, ...contextMatches]) {
+      const key = inv.id || inv.invoiceNumber
+      if (key) {
+        // If context has an updated version, prefer it
+        const ctxVersion = contextMatches.find((c) => c.id === inv.id || c.invoiceNumber === inv.invoiceNumber)
+        map.set(key, ctxVersion || inv)
+      }
+    }
+    return Array.from(map.values()).sort(
+      (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+    )
+  }, [customer, invoices])
+
+  const totalInvoiced = useMemo(() => {
+    return customerInvoices.reduce((sum, inv) => sum + (Number(inv.total) || 0), 0)
+  }, [customerInvoices])
+
+  const totalAmountPaid = useMemo(() => {
+    return customerInvoices.reduce((sum, inv) => sum + (Number(inv.amountPaid) || 0), 0)
+  }, [customerInvoices])
+
+  const totalBalanceDue = useMemo(() => {
+    return customerInvoices.reduce((sum, inv) => sum + (Number(inv.balanceDue) || 0), 0)
+  }, [customerInvoices])
+
+  const paidInvoicesCount = useMemo(() => {
+    return customerInvoices.filter(
+      (inv) => inv.status === 'paid' || (Number(inv.balanceDue || 0) <= 0 && Number(inv.total || 0) > 0)
+    ).length
+  }, [customerInvoices])
+
+  const pendingInvoicesCount = useMemo(() => {
+    return customerInvoices.filter(
+      (inv) => inv.status === 'pending' || inv.status === 'advance_received' || Number(inv.balanceDue || 0) > 0
+    ).length
+  }, [customerInvoices])
+
+  const handleOpenPaymentModal = (inv: Invoice) => {
+    setPaymentModalInvoice(inv)
+    setPaymentAmount(Number(inv.balanceDue || 0) > 0 ? Number(inv.balanceDue) : 0)
+    setPaymentMode('neft_rtgs')
+    setPaymentRef('')
+  }
+
+  const handleConfirmPayment = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!paymentModalInvoice || paymentAmount <= 0) return
+    setIsRecordingPayment(true)
+    try {
+      recordInvoicePayment(
+        paymentModalInvoice.id,
+        paymentAmount,
+        paymentMode,
+        paymentRef.trim() || undefined
+      )
+      setPaymentModalInvoice(null)
+      fetchCustomerDetails()
+    } catch (err: any) {
+      addToast('error', 'Payment Recording Error', err.message || 'Could not record payment.')
+    } finally {
+      setIsRecordingPayment(false)
+    }
+  }
+
+  const handleDownloadPdf = async (inv: Invoice) => {
+    try {
+      setDownloadingInvoiceId(inv.id)
+      let targetPdfUrl = inv.pdfUrl
+      if (!targetPdfUrl) {
+        targetPdfUrl = (await generateInvoicePdf(inv.id, inv)) || undefined
+        if (targetPdfUrl) {
+          updateInvoice(inv.id, { pdfUrl: targetPdfUrl })
+        }
+      }
+
+      const fileName = `${inv.invoiceNumber || 'invoice'}.pdf`
+      let downloaded = false
+
+      if (targetPdfUrl) {
+        try {
+          const res = await fetch(targetPdfUrl)
+          if (res.ok) {
+            const blob = await res.blob()
+            const blobUrl = window.URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = blobUrl
+            link.download = fileName
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
+            setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000)
+            downloaded = true
+          }
+        } catch (e) {
+          console.warn('Direct PDF blob download failed:', e)
+        }
+      }
+
+      if (!downloaded) {
+        window.open(targetPdfUrl || `/api/invoices/${inv.id}/pdf`, '_blank')
+      }
+      addToast('success', 'Invoice Downloaded', `Tax invoice ${inv.invoiceNumber} PDF ready.`)
+    } catch (err: any) {
+      addToast('error', 'Download Failed', err.message || 'Could not download invoice PDF.')
+    } finally {
+      setDownloadingInvoiceId(null)
+    }
+  }
 
   // Fetch full details
   const fetchCustomerDetails = async () => {
@@ -712,6 +906,7 @@ export const CustomerDetailsView: React.FC<CustomerDetailsViewProps> = ({
           { id: 'contacts', label: 'Contacts', icon: Users, count: customer.contacts?.length },
           { id: 'addresses', label: 'Sites & Facilities', icon: MapPin, count: customer.addresses?.length },
           { id: 'orders', label: 'Order History', icon: Package, count: customer.orders?.length },
+          { id: 'invoices', label: 'Invoices & Billing', icon: Receipt, count: customerInvoices.length },
           { id: 'activity', label: 'Activity & Notes', icon: MessageSquare, count: customer.notes?.length },
         ].map((tab) => {
           const Icon = tab.icon
@@ -964,6 +1159,86 @@ export const CustomerDetailsView: React.FC<CustomerDetailsViewProps> = ({
               ) : (
                 <div className="py-4 text-center text-xs text-slate-400 italic">
                   No facility address added yet. Click "Sites & Facilities" tab to add one.
+                </div>
+              )}
+            </div>
+
+            {/* Invoicing & Account Balance Summary Card */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-2xs space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                  <Receipt className="w-3.5 h-3.5 text-orange-500" />
+                  Tax Invoicing & Payment Balance
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('invoices')}
+                  className="text-[11px] font-bold text-orange-600 hover:text-orange-700 hover:underline cursor-pointer flex items-center gap-1"
+                >
+                  View Invoices ({customerInvoices.length}) →
+                </button>
+              </div>
+
+              {customerInvoices.length > 0 ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200/70">
+                      <span className="text-[9.5px] font-bold text-slate-400 uppercase tracking-wider block">
+                        Total Invoiced
+                      </span>
+                      <span className="text-xs sm:text-sm font-black text-slate-900 font-mono block mt-0.5">
+                        ₹{totalInvoiced.toLocaleString('en-IN')}
+                      </span>
+                    </div>
+
+                    <div className="p-2.5 bg-emerald-50/70 rounded-xl border border-emerald-200/80">
+                      <span className="text-[9.5px] font-bold text-emerald-700 uppercase tracking-wider block">
+                        Amount Paid
+                      </span>
+                      <span className="text-xs sm:text-sm font-black text-emerald-700 font-mono block mt-0.5">
+                        ₹{totalAmountPaid.toLocaleString('en-IN')}
+                      </span>
+                    </div>
+
+                    <div
+                      className={`p-2.5 rounded-xl border ${
+                        totalBalanceDue > 0 ? 'bg-amber-50/70 border-amber-200/80' : 'bg-slate-50 border-slate-200/70'
+                      }`}
+                    >
+                      <span
+                        className={`text-[9.5px] font-bold uppercase tracking-wider block ${
+                          totalBalanceDue > 0 ? 'text-amber-700' : 'text-slate-400'
+                        }`}
+                      >
+                        Balance Due
+                      </span>
+                      <span
+                        className={`text-xs sm:text-sm font-black font-mono block mt-0.5 ${
+                          totalBalanceDue > 0 ? 'text-amber-700' : 'text-slate-800'
+                        }`}
+                      >
+                        ₹{totalBalanceDue.toLocaleString('en-IN')}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs text-slate-500 pt-1 border-t border-slate-100">
+                    <span className="flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      {paidInvoicesCount} of {customerInvoices.length} invoices cleared
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('invoices')}
+                      className="font-bold text-orange-600 hover:text-orange-700 text-xs"
+                    >
+                      Open Invoices Tab →
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="py-3 text-center text-xs text-slate-400 italic">
+                  No invoices created for this customer yet.
                 </div>
               )}
             </div>
@@ -1393,7 +1668,214 @@ export const CustomerDetailsView: React.FC<CustomerDetailsViewProps> = ({
         </div>
       )}
 
-      {/* 8. TAB 5: ACTIVITY & NOTES */}
+      {/* 8. TAB: INVOICES & ENTERPRISE BILLING */}
+      {activeTab === 'invoices' && (
+        <div className="space-y-4 animate-fade-in">
+          {/* Header Title & Actions */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1 border-b border-slate-100">
+            <div>
+              <h3 className="text-sm sm:text-base font-black text-slate-900 flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-orange-500" />
+                GST Tax Invoices & Payment Ledger
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Official billing records, amount paid and outstanding balances for {customer.companyName}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCurrentView('invoices')}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold transition shadow-2xs self-start sm:self-auto cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Create New Invoice</span>
+            </button>
+          </div>
+
+          {/* Conditional Rendering: Invoices List vs Empty State */}
+          {customerInvoices.length > 0 ? (
+            <>
+              {/* Compact Summary Strip */}
+              <div className="flex items-center justify-between flex-wrap gap-2.5 px-3 py-2 bg-slate-50/90 rounded-xl border border-slate-200/80 text-xs">
+                <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Total Billed:</span>
+                    <span className="font-mono font-bold text-slate-900">₹{totalInvoiced.toLocaleString('en-IN')}</span>
+                  </div>
+                  <span className="text-slate-300 hidden sm:inline">|</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider">Paid:</span>
+                    <span className="font-mono font-bold text-emerald-700">₹{totalAmountPaid.toLocaleString('en-IN')}</span>
+                  </div>
+                  <span className="text-slate-300 hidden sm:inline">|</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] text-amber-600 font-bold uppercase tracking-wider">Balance:</span>
+                    <span className="font-mono font-bold text-amber-700">₹{totalBalanceDue.toLocaleString('en-IN')}</span>
+                  </div>
+                </div>
+
+                <div className="text-[11px] text-slate-500 font-medium">
+                  <span>{customerInvoices.length} {customerInvoices.length === 1 ? 'Invoice' : 'Invoices'}</span>
+                  {paidInvoicesCount > 0 && (
+                    <span className="text-emerald-600 font-semibold ml-1">
+                      ({paidInvoicesCount} paid{pendingInvoicesCount > 0 ? `, ${pendingInvoicesCount} pending` : ''})
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Compact Simple Invoice Cards */}
+              <div className="space-y-2">
+                {customerInvoices.map((inv) => {
+                  const isPaid = inv.status === 'paid' || (Number(inv.balanceDue || 0) <= 0 && Number(inv.total || 0) > 0)
+                  const isAdvance =
+                    inv.status === 'advance_received' ||
+                    (Number(inv.amountPaid || 0) > 0 && Number(inv.balanceDue || 0) > 0)
+                  const isOverdue = inv.status === 'overdue'
+
+                  return (
+                    <div
+                      key={inv.id}
+                      className="p-3 bg-white rounded-xl border border-slate-200/90 shadow-2xs hover:border-slate-300 transition flex flex-col md:flex-row md:items-center justify-between gap-2.5"
+                    >
+                      {/* Left: Invoice Number, Status Badge & Info */}
+                      <div className="space-y-0.5 min-w-[200px]">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono font-bold text-xs sm:text-sm text-slate-900">{inv.invoiceNumber}</span>
+                          <span
+                            className={`px-2 py-0.2 rounded-full text-[9.5px] font-bold border ${
+                              isPaid
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : isAdvance
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : isOverdue
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                : 'bg-amber-50 text-amber-700 border-amber-200'
+                            }`}
+                          >
+                            {isPaid ? 'Paid' : isAdvance ? 'Advance' : isOverdue ? 'Overdue' : 'Pending'}
+                          </span>
+                          {inv.poNumber && (
+                            <span className="text-[10px] text-slate-400 font-mono">PO: {inv.poNumber}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400 font-medium">
+                          <span>{inv.issueDate ? new Date(inv.issueDate).toLocaleDateString('en-IN') : 'N/A'}</span>
+                          <span>·</span>
+                          <span>{inv.items?.length || 0} line items</span>
+                        </div>
+                      </div>
+
+                      {/* Middle: Total, Paid & Balance (Clear, prominent & compact) */}
+                      <div className="flex items-center gap-3 sm:gap-4 bg-slate-50/90 px-3 py-1.5 rounded-lg border border-slate-200/70 shrink-0 self-start md:self-auto">
+                        <div>
+                          <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Total</span>
+                          <span className="font-mono font-bold text-xs sm:text-sm text-slate-800">
+                            ₹{Number(inv.total || 0).toLocaleString('en-IN')}
+                          </span>
+                        </div>
+
+                        <div className="w-px h-5 bg-slate-200" />
+
+                        <div>
+                          <span className="text-[9px] uppercase font-bold text-emerald-600 block tracking-wider">Paid</span>
+                          <span className="font-mono font-bold text-xs sm:text-sm text-emerald-700">
+                            ₹{Number(inv.amountPaid || 0).toLocaleString('en-IN')}
+                          </span>
+                        </div>
+
+                        <div className="w-px h-5 bg-slate-200" />
+
+                        <div>
+                          <span
+                            className={`text-[9px] uppercase font-bold block tracking-wider ${
+                              Number(inv.balanceDue || 0) > 0 ? 'text-amber-600' : 'text-slate-400'
+                            }`}
+                          >
+                            Balance
+                          </span>
+                          <span
+                            className={`font-mono font-bold text-xs sm:text-sm ${
+                              Number(inv.balanceDue || 0) > 0 ? 'text-amber-700' : 'text-slate-700'
+                            }`}
+                          >
+                            ₹{Number(inv.balanceDue || 0).toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Right: Actions */}
+                      <div className="flex items-center gap-1.5 shrink-0 self-end md:self-center">
+                        {Number(inv.balanceDue || 0) > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenPaymentModal(inv)}
+                            className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                            title="Record Payment"
+                          >
+                            <DollarSign className="w-3 h-3" />
+                            <span>Pay</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => openInvoiceInView(inv.id)}
+                          className="p-1.5 hover:bg-slate-100 text-slate-600 hover:text-slate-900 rounded-lg transition cursor-pointer"
+                          title="View Invoice in Invoices Page"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadPdf(inv)}
+                          disabled={downloadingInvoiceId === inv.id}
+                          className="p-1.5 hover:bg-slate-100 text-slate-600 hover:text-slate-900 rounded-lg transition disabled:opacity-50 cursor-pointer"
+                          title="Download PDF"
+                        >
+                          {downloadingInvoiceId === inv.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Download className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          ) : (
+            /* Empty State: If NO invoice is created for this customer */
+            <div className="py-14 bg-white rounded-2xl border border-slate-200 text-center space-y-3 px-4 shadow-2xs">
+              <div className="w-12 h-12 rounded-2xl bg-orange-50 text-orange-500 flex items-center justify-center mx-auto border border-orange-100">
+                <Receipt className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-sm sm:text-base font-black text-slate-900">
+                  No Invoices Created for {customer.companyName}
+                </h4>
+                <p className="text-xs text-slate-500 max-w-md mx-auto">
+                  There are no GST tax invoices linked to this customer account yet. Invoices created using this company
+                  or converted from approved commercial proposals will automatically appear here with real-time paid
+                  amounts and balances.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCurrentView('invoices')}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold transition shadow-xs cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Create First Invoice for this Customer</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 9. TAB 6: ACTIVITY & NOTES */}
       {activeTab === 'activity' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5 animate-fade-in">
           {/* Left Column: Internal CRM Notes */}
@@ -1819,6 +2301,139 @@ export const CustomerDetailsView: React.FC<CustomerDetailsViewProps> = ({
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* RECORD INVOICE PAYMENT MODAL */}
+      <Modal
+        isOpen={Boolean(paymentModalInvoice)}
+        onClose={() => setPaymentModalInvoice(null)}
+        title={paymentModalInvoice ? `Record Payment · ${paymentModalInvoice.invoiceNumber}` : 'Record Payment'}
+        subtitle={customer?.companyName || 'Corporate Customer'}
+        maxWidth="max-w-md"
+      >
+        {paymentModalInvoice && (
+          <form onSubmit={handleConfirmPayment} className="space-y-4">
+            {/* Invoice Financial Snapshot */}
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500 font-medium">Invoice Total:</span>
+                <span className="font-mono font-bold text-slate-900">
+                  ₹{Number(paymentModalInvoice.total || 0).toLocaleString('en-IN')}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-emerald-700 font-medium flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                  Already Paid:
+                </span>
+                <span className="font-mono font-bold text-emerald-700">
+                  ₹{Number(paymentModalInvoice.amountPaid || 0).toLocaleString('en-IN')}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs pt-1.5 border-t border-slate-200/60">
+                <span className="text-amber-700 font-bold flex items-center gap-1">
+                  <Clock className="w-3 h-3 text-amber-600" />
+                  Remaining Balance:
+                </span>
+                <span className="font-mono font-black text-amber-700 text-sm">
+                  ₹{Number(paymentModalInvoice.balanceDue || 0).toLocaleString('en-IN')}
+                </span>
+              </div>
+            </div>
+
+            {/* Payment Amount */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Payment Amount (₹) <span className="text-rose-500">*</span>
+              </label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">₹</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={paymentModalInvoice.balanceDue}
+                  value={paymentAmount || ''}
+                  onChange={(e) => setPaymentAmount(Math.max(0, Number(e.target.value)))}
+                  required
+                  placeholder="Enter payment amount"
+                  className="w-full pl-7 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                />
+              </div>
+              {/* Quick shortcut buttons */}
+              <div className="flex items-center gap-1.5 mt-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPaymentAmount(paymentModalInvoice.balanceDue)}
+                  className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition cursor-pointer"
+                >
+                  Pay Full Balance (₹{paymentModalInvoice.balanceDue.toLocaleString('en-IN')})
+                </button>
+                {paymentModalInvoice.balanceDue > 1000 && (
+                  <button
+                    type="button"
+                    onClick={() => setPaymentAmount(Math.round(paymentModalInvoice.balanceDue / 2))}
+                    className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 transition cursor-pointer"
+                  >
+                    50% (₹{Math.round(paymentModalInvoice.balanceDue / 2).toLocaleString('en-IN')})
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Payment Mode */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Payment Method</label>
+              <select
+                value={paymentMode}
+                onChange={(e) => setPaymentMode(e.target.value as PaymentMode)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+              >
+                <option value="neft_rtgs">NEFT / RTGS / Bank Transfer</option>
+                <option value="upi">UPI / QR Code</option>
+                <option value="cheque">Bank Cheque / DD</option>
+                <option value="card">Corporate Credit / Debit Card</option>
+                <option value="cash">Cash Settlement</option>
+              </select>
+            </div>
+
+            {/* Payment Reference / UTR Number */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Transaction Reference / UTR / Cheque # (Optional)
+              </label>
+              <input
+                type="text"
+                value={paymentRef}
+                onChange={(e) => setPaymentRef(e.target.value)}
+                placeholder="e.g. UTR123456789 or CHQ-0045"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+              />
+            </div>
+
+            {/* Actions */}
+            <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPaymentModalInvoice(null)}
+                className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isRecordingPayment || paymentAmount <= 0}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+              >
+                {isRecordingPayment ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Check className="w-3.5 h-3.5" />
+                )}
+                <span>Record ₹{paymentAmount.toLocaleString('en-IN')} Payment</span>
+              </button>
+            </div>
+          </form>
+        )}
       </Modal>
     </div>
   )

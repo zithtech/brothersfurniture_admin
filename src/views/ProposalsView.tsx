@@ -1238,7 +1238,9 @@ export const ProposalsView: React.FC = () => {
                     <tr
                       key={prop.id}
                       className="hover:bg-slate-50/80 transition-colors group cursor-pointer"
-                      onClick={() => setSelectedProposal(prop)}
+                      onClick={() => {
+                        setSelectedProposal(prop)
+                      }}
                     >
                       {/* Ref & Date */}
                       <td className="py-2.5 px-3.5 whitespace-nowrap">
@@ -1419,7 +1421,9 @@ export const ProposalsView: React.FC = () => {
             return (
               <div
                 key={prop.id}
-                onClick={() => setSelectedProposal(prop)}
+                onClick={() => {
+                  setSelectedProposal(prop)
+                }}
                 className="bg-white rounded-xl border border-slate-200/90 p-3 shadow-2xs hover:border-orange-300 hover:shadow-sm transition-all duration-200 flex flex-col justify-between group cursor-pointer"
               >
                 {/* Row 1: Proposal # + 3-Dot Actions */}

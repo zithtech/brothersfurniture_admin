@@ -143,6 +143,7 @@ export interface Customer {
   notes?: CustomerNote[]
   activityLogs?: CustomerActivityLog[]
   orders?: any[]
+  invoices?: any[]
 }
 
 export interface CustomerStats {

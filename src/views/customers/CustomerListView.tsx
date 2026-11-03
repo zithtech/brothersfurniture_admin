@@ -70,7 +70,7 @@ export const CustomerListView: React.FC<CustomerListViewProps> = ({
   const { addToast, confirm } = useAdmin()
 
   // View state
-  const [viewMode, setViewMode] = useState<'card' | 'table'>('card')
+  const [viewMode, setViewMode] = useState<'card' | 'table'>('table')
 
   // Search & Filters
   const [search, setSearch] = useState('')
@@ -741,22 +741,23 @@ export const CustomerListView: React.FC<CustomerListViewProps> = ({
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 {customers.map((c) => (
-                  <tr key={c.id} className="hover:bg-slate-50/70 transition">
+                  <tr
+                    key={c.id}
+                    onClick={() => onSelectCustomer(c)}
+                    className="hover:bg-slate-50/80 transition-colors cursor-pointer group"
+                  >
                     <td className="p-3.5 font-mono font-bold text-orange-600">{c.customerCode}</td>
                     <td className="p-3.5">
-                      <button
-                        onClick={() => onSelectCustomer(c)}
-                        className="font-bold text-slate-900 hover:text-orange-600 text-left cursor-pointer"
-                      >
+                      <span className="font-bold text-slate-900 group-hover:text-orange-600 transition-colors text-left block">
                         {c.companyName}
-                      </button>
+                      </span>
                       <p className="text-[11px] text-slate-400">{c.companyPhone}</p>
                     </td>
                     <td className="p-3.5">
                       <span className="font-semibold text-slate-800">{c.category}</span>
                       <p className="text-[11px] text-slate-400">{c.companySize}</p>
                     </td>
-                    <td className="p-3.5">
+                    <td className="p-3.5" onClick={(e) => e.stopPropagation()}>
                       <select
                         value={c.status}
                         onChange={(e) => handleToggleStatus(c, e.target.value as CustomerStatus)}
@@ -815,7 +816,7 @@ export const CustomerListView: React.FC<CustomerListViewProps> = ({
                       <p className="text-[11px] text-slate-400">{c.primaryAddress?.state || ''}</p>
                     </td>
                     <td className="p-3.5 font-mono text-[11px] text-slate-600">{c.gstNumber || '—'}</td>
-                    <td className="p-3.5 text-right">
+                    <td className="p-3.5 text-right" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
                         <button
                           onClick={() => onSelectCustomer(c)}
