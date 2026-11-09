@@ -45,6 +45,7 @@ export const Header: React.FC<HeaderProps> = ({
     products,
     orders,
     setCurrentView,
+    settings,
   } = useAdmin()
 
   const { user, hasRole, admins } = useAuth()
@@ -284,7 +285,14 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Logo on Mobile */}
           <div className="flex items-center gap-2 lg:hidden mr-3">
-            <img src={logoImg} alt="Brother Furniture" className="h-7 w-auto object-contain" />
+            <img
+              src={settings?.logoUrl || logoImg}
+              alt={settings?.name || 'Brothers Furniture'}
+              onError={(e) => {
+                e.currentTarget.src = logoImg
+              }}
+              className="h-7 w-auto object-contain"
+            />
           </div>
         </div>
 

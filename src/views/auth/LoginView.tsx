@@ -12,11 +12,13 @@ import {
   WifiOff,
 } from 'lucide-react'
 import logoImg from '../../assets/logo.png'
+import { useAdmin } from '../../context/AdminContext'
 import { useAuth } from '../../context/AuthContext'
 import { isNetworkAvailable } from '../../services/authApi'
 
 export const LoginView: React.FC = () => {
   const { login, setAuthView } = useAuth()
+  const { settings } = useAdmin()
 
   const [email, setEmail] = useState('brothersfurniture91@gmail.com')
   const [password, setPassword] = useState('bf@superadmin')
@@ -95,16 +97,19 @@ export const LoginView: React.FC = () => {
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center z-10 px-4">
         <div className="inline-flex items-center justify-center p-3 bg-white/10 backdrop-blur-md rounded-2xl border border-white/15 shadow-xl mb-4">
           <img
-            src={logoImg}
-            alt="Brothers Furniture"
+            src={settings?.logoUrl || logoImg}
+            alt={settings?.name || 'Brothers Furniture'}
+            onError={(e) => {
+              e.currentTarget.src = logoImg
+            }}
             className="h-11 w-auto object-contain filter drop-shadow-md"
           />
         </div>
         <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight font-sans">
-          Brothers Furniture
+          {settings?.name || 'Brothers Furniture'}
         </h1>
         <p className="mt-1.5 text-xs sm:text-sm text-slate-300 font-medium">
-          Enterprise Administration & Factory Operations Portal
+          {settings?.brandTagline || 'Enterprise Administration & Factory Operations Portal'}
         </p>
       </div>
 

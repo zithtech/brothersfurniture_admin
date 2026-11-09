@@ -330,6 +330,7 @@ export interface Order {
   createdAt: string
   targetDeliveryDate?: string
   notes?: string
+  pdfUrl?: string
 }
 
 export type ProposalStatus = 'draft' | 'sent' | 'under_review' | 'approved' | 'rejected' | 'converted'
@@ -477,6 +478,8 @@ export interface TestimonialReview {
 
 export interface CompanySettings {
   name: string
+  brandTagline?: string
+  logoUrl?: string
   addressLines: string[]
   phones: { display: string; tel: string }[]
   email: string

@@ -39,7 +39,7 @@ interface NavSection {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, setIsMobileOpen }) => {
-  const { currentView, setCurrentView, totalBinCount } = useAdmin()
+  const { currentView, setCurrentView, totalBinCount, settings } = useAdmin()
   const { admins } = useAuth()
   const pendingAdminsCount = admins.filter((a) => a.status === 'pending_approval').length
 
@@ -172,11 +172,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen, setIsMobileOpen 
         <button
           onClick={() => handleNavClick('dashboard')}
           className="focus:outline-none cursor-pointer flex items-center"
-          title="Brothers Furniture"
+          title={settings?.name || 'Brothers Furniture'}
         >
           <img
-            src={logoImg}
-            alt="Brother Furniture"
+            src={settings?.logoUrl || logoImg}
+            alt={settings?.name || 'Brothers Furniture'}
+            onError={(e) => {
+              e.currentTarget.src = logoImg
+            }}
             style={{
               height: '36px',
               width: 'auto',

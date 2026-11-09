@@ -97,13 +97,21 @@ const AdminContent: React.FC = () => {
 
 const AppRoot: React.FC = () => {
   const { isAuthenticated, isLoading, authView } = useAuth()
+  const { settings } = useAdmin()
 
   // Splash loading screen while verifying stored credentials
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white select-none">
         <div className="p-3 bg-white/10 rounded-2xl border border-white/15 mb-4 animate-pulse">
-          <img src={logoImg} alt="Brothers Furniture" className="h-10 w-auto" />
+          <img
+            src={settings?.logoUrl || logoImg}
+            alt={settings?.name || 'Brothers Furniture'}
+            onError={(e) => {
+              e.currentTarget.src = logoImg
+            }}
+            className="h-10 w-auto object-contain"
+          />
         </div>
         <p className="text-sm font-semibold tracking-wide text-slate-300">
           Securing Administrator Session...
